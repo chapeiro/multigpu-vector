@@ -77,7 +77,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
             //compute position of result
             if (predicate[k]){
                 int32_t offset = filterout + __popc(filter & prevwrapmask);
-                output[offset] = tmp.i[k];//input[blockDim.x*k + i];
+                output[(offset % warpSize) + (offset/warpSize)*blockDim.x + warpid * warpSize] = tmp.i[k];//input[blockDim.x*k + i];
             }
 
             filterout += newpop;
@@ -199,6 +199,8 @@ int main(){
         if (b_pinned[i] == -1) {
             results1 = i;
             break;
+        } else {
+            assert(b_pinned[i] < 50);
         }
     }
     // int results = N;
@@ -213,6 +215,8 @@ int main(){
         if (b[i] == -1) {
             results2 = i;
             break;
+        } else {
+            assert(b[i] < 50);
         }
     }
     // cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
