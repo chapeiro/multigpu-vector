@@ -30,10 +30,10 @@ extern __shared__ int32_t s[];
 __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     int32_t *input  = (int32_t *) (s               );
     int32_t *output = (int32_t *) (s +   blockDim.x);
-    int32_t *elems  = (int32_t *) (s + 3*blockDim.x);
 #if __CUDA_ARCH__ < 300
-    int32_t *bcount = (int32_t *) (s + 3*blockDim.x+1);
+    int32_t *bcount = (int32_t *) (s + 3*blockDim.x);
 #endif
+    int32_t *elems  = (int32_t *) (s + 3*blockDim.x+BRDCSTMEM(blockDim));
 
     int32_t i       = threadIdx.x;
     int32_t laneid  = i % warpSize;
@@ -141,7 +141,7 @@ int main(){
     cudaEventCreate(&start2);
     cudaEventCreate(&stop2);
     dim3 dimBlock( 1024, 1 );
-    dim3 dimGrid( 1, 1 );
+    dim3 dimGrid( 2, 1 );
 
     cudaMallocHost((void**)&a_pinned, N*sizeof(int32_t));
     cudaMallocHost((void**)&b_pinned, N*sizeof(int32_t));
@@ -151,9 +151,6 @@ int main(){
     gpu(cudaMalloc( (void**)&a_dev, N*sizeof(int32_t)));
     gpu(cudaMalloc( (void**)&b_dev, N*sizeof(int32_t)));
 
-    cudaEventRecord(start);
-    gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
-    cout << (3 * dimBlock.x + (dimBlock.x / WARPSIZE) + 1)*sizeof(int32_t) << endl;
     cudaEventRecord(start1);
     unstable_select<<<dimGrid, dimBlock, (3 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
 #ifndef NDEBUG
@@ -161,6 +158,10 @@ int main(){
     gpu( cudaDeviceSynchronize() );
 #endif
     cudaEventRecord(stop1);
+
+    cudaEventRecord(start);
+    gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
+    cout << (3 * dimBlock.x + (dimBlock.x / WARPSIZE) + 1)*sizeof(int32_t) << endl;
     cudaEventRecord(start2);
     unstable_select<<<dimGrid, dimBlock, (3 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N);
 #ifndef NDEBUG
@@ -182,13 +183,13 @@ int main(){
             break;
         }
     }
-    int results = N;
-    for (int i = 0 ; i < N ; ++i) {
-        if (a_pinned[i] == -1) {
-            results = i;
-            break;
-        }
-    }
+    // int results = N;
+    // for (int i = 0 ; i < N ; ++i) {
+    //     if (a_pinned[i] == -1) {
+    //         results = i;
+    //         break;
+    //     }
+    // }
     int results2 = N;
     for (int i = 0 ; i < N ; ++i) {
         if (b[i] == -1) {
@@ -196,13 +197,16 @@ int main(){
             break;
         }
     }
-    cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
+    // cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
 
-    assert(results == results2);
+    // assert(results1 == results2);
+    if (results1 != results2){
+        cout << "Wrong results!!!!!!" << endl;
+    }
 
-    cudaFreeHost(a_pinned);
+    gpu(cudaFreeHost(a_pinned));
+    gpu(cudaFreeHost(b_pinned));
 
-    cudaEventSynchronize(stop);
     float milliseconds1 = 0;
     cudaEventElapsedTime(&milliseconds1, start, stop);
     cout << milliseconds1 << endl;
@@ -214,7 +218,14 @@ int main(){
     cout << milliseconds3 << endl;
 
     cout << endl;
-    cout << (millis - milliseconds2)/milliseconds1 << endl;
-    cout << (millis - milliseconds2)/milliseconds3 << endl;
+    cout << millis/milliseconds1 << endl;
+    cout << millis/milliseconds2 << endl;
+    cout << millis/milliseconds3 << endl;
+    
+    cudaDeviceSynchronize();
+    cudaDeviceReset();
+
+
+
     return EXIT_SUCCESS;
 }
