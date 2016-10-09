@@ -66,7 +66,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
         //compute position of result
         if (predicate){
             int32_t offset = filterout + __popc(filter & prevwrapmask);
-            output[offset] = input[i];
+            output[(offset % warpSize) + (offset/warpSize)*blockDim.x + warpid * warpSize] = input[i];
         }
 
         filterout += newpop;
@@ -87,6 +87,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
             filterout                     -= warpSize;
         }
     }
+    __syncthreads();
 
 #if __CUDA_ARCH__ < 300
     if (laneid == 0) bcount[warpid] = atomicAdd(elems, filterout);
@@ -141,7 +142,7 @@ int main(){
     cudaEventCreate(&start2);
     cudaEventCreate(&stop2);
     dim3 dimBlock( 1024, 1 );
-    dim3 dimGrid( 2, 1 );
+    dim3 dimGrid( 1, 1 );
 
     cudaMallocHost((void**)&a_pinned, N*sizeof(int32_t));
     cudaMallocHost((void**)&b_pinned, N*sizeof(int32_t));
@@ -181,6 +182,8 @@ int main(){
         if (b_pinned[i] == -1) {
             results1 = i;
             break;
+        } else {
+            assert(b_pinned[i] < 50);
         }
     }
     // int results = N;
@@ -195,6 +198,8 @@ int main(){
         if (b[i] == -1) {
             results2 = i;
             break;
+        } else {
+            assert(b[i] < 50);
         }
     }
     // cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
