@@ -7,7 +7,7 @@
 
 using namespace std;
 
-const int N = 100000000;
+const int N = 10000*2*1024*4;
 
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true){
@@ -25,15 +25,20 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 #define BRDCSTMEM(dimBlock) (0)
 #endif
 
+union vec4{
+    int4 vec;
+    int  i[4];
+};
+
 extern __shared__ int32_t s[];
 
-__global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
+__global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *Nres = NULL){
     int32_t *input  = (int32_t *) (s               );
-    int32_t *output = (int32_t *) (s +   blockDim.x);
+    int32_t *output = (int32_t *) (s + 4*blockDim.x);
 #if __CUDA_ARCH__ < 300
-    int32_t *bcount = (int32_t *) (s + 3*blockDim.x);
+    int32_t *bcount = (int32_t *) (s + 6*blockDim.x);
 #endif
-    int32_t *elems  = (int32_t *) (s + 3*blockDim.x+BRDCSTMEM(blockDim));
+    int32_t *elems  = (int32_t *) (s + 6*blockDim.x+BRDCSTMEM(blockDim));
 
     int32_t i       = threadIdx.x;
     int32_t laneid  = i % warpSize;
@@ -49,44 +54,52 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     __syncthreads();
     
     //read from global memory
-    for (int j = 0 ; j < N ; j += blockDim.x){
-        bool predicate = false;
-        if (i+j < N){
-            input[i] = a_dev[i+j];
+    for (int j = 0 ; j < N ; j += 4*blockDim.x){
+        bool predicate[4] = {false, false, false, false};
+        vec4 tmp = reinterpret_cast<vec4*>(a_dev)[i+j/4];
+        #pragma unroll
+        for (int k = 0 ; k < 4 ; ++k){
+            if (4*i+j+k < N){
+                // input[blockDim.x*k + i] = tmp.i[k];
 
-            //compute predicate
-            predicate = input[i] < 50;
+                //compute predicate
+                predicate[k] = tmp.i[k] < 50;
+            }
         }
         
-        //aggreagate predicate results
-        int32_t filter = __ballot(predicate); //filter now contains set bits only for threads
+        #pragma unroll
+        for (int k = 0 ; k < 4 ; ++k){
+            //aggreagate predicate results
+            int32_t filter = __ballot(predicate[k]); //filter now contains set bits only for threads
 
-        int32_t newpop = __popc(filter);
+            int32_t newpop = __popc(filter);
 
-        //compute position of result
-        if (predicate){
-            int32_t offset = filterout + __popc(filter & prevwrapmask);
-            output[offset] = input[i];
-        }
+            //compute position of result
+            if (predicate[k]){
+                int32_t offset = filterout + __popc(filter & prevwrapmask);
+                output[offset] = tmp.i[k];//input[blockDim.x*k + i];
+            }
 
-        filterout += newpop;
+            filterout += newpop;
 
-        if (filterout >= warpSize){
-            // if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
-            // int32_t elems_old              = bcount[warpid];
+            if (filterout >= warpSize){
+                // if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
+                // int32_t elems_old              = bcount[warpid];
 #if __CUDA_ARCH__ < 300
-            if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
-            int32_t elems_old = bcount[warpid];
+                if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
+                int32_t elems_old = bcount[warpid];
 #else
-            int32_t tmp;
-            if (laneid == 0) tmp = atomicAdd(elems, warpSize);
-            int32_t elems_old = __shfl(tmp, 0);
+                int32_t tmp;
+                if (laneid == 0) tmp = atomicAdd(elems, warpSize);
+                int32_t elems_old = __shfl(tmp, 0);
 #endif
-            b_dev[elems_old + laneid]      = output[i];
-            output[i]                      = output[i + blockDim.x];
-            filterout                     -= warpSize;
+                b_dev[elems_old + laneid]      = output[i];
+                output[i]                      = output[i + blockDim.x];
+                filterout                     -= warpSize;
+            }
         }
     }
+    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
 
 #if __CUDA_ARCH__ < 300
     if (laneid == 0) bcount[warpid] = atomicAdd(elems, filterout);
@@ -132,7 +145,7 @@ int main(){
         cout << millis << " ms" << endl;
     }
     int32_t *a_pinned, *a_dev;
-    int32_t *b_pinned, *b_dev;
+    int32_t *b_pinned, *b_dev, *res0, *res1;
     cudaEvent_t start, stop, start1, stop1, start2, stop2;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -141,10 +154,12 @@ int main(){
     cudaEventCreate(&start2);
     cudaEventCreate(&stop2);
     dim3 dimBlock( 1024, 1 );
-    dim3 dimGrid( 2, 1 );
+    dim3 dimGrid( 1, 1 );
 
     cudaMallocHost((void**)&a_pinned, N*sizeof(int32_t));
     cudaMallocHost((void**)&b_pinned, N*sizeof(int32_t));
+    gpu(cudaMalloc((void**)&res0, sizeof(int32_t)));
+    gpu(cudaMalloc((void**)&res1, sizeof(int32_t)));
 
     memcpy(a_pinned, a, N*sizeof(int32_t));
 
@@ -152,7 +167,7 @@ int main(){
     gpu(cudaMalloc( (void**)&b_dev, N*sizeof(int32_t)));
 
     cudaEventRecord(start1);
-    unstable_select<<<dimGrid, dimBlock, (3 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
+    unstable_select<<<dimGrid, dimBlock, (6 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N, res0);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
@@ -163,7 +178,7 @@ int main(){
     gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
     cout << (3 * dimBlock.x + (dimBlock.x / WARPSIZE) + 1)*sizeof(int32_t) << endl;
     cudaEventRecord(start2);
-    unstable_select<<<dimGrid, dimBlock, (3 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N);
+    unstable_select<<<dimGrid, dimBlock, (6 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N, res1);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
