@@ -63,7 +63,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
                 // input[blockDim.x*k + i] = tmp.i[k];
 
                 //compute predicate
-                predicate[k] = tmp.i[k] < 50;
+                predicate[k] = tmp.i[k] <= 50;
             }
         }
         
@@ -112,8 +112,12 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
     if (laneid == 0) tmp = atomicAdd(elems, filterout);
     int32_t elems_old = __shfl(tmp, 0);
 #endif
-    if (laneid < filterout) b_dev[elems_old + laneid] = output[i];
-
+    int32_t j = laneid;
+    while (j < filterout) {
+        b_dev[elems_old + j] = output[i];
+        j                   += warpSize;
+    }
+    
     __syncthreads();
     if (i == 0) b_dev[*elems] = -1;
 }
@@ -123,14 +127,14 @@ int32_t b[N];
 
 void stable_select_cpu(int32_t *a, int32_t *b, int N){
     int i = 0;
-    for (int j = 0 ; j < N ; ++j) if (a[j] < 50) b[i++] = a[j];
+    for (int j = 0 ; j < N ; ++j) if (a[j] <= 50) b[i++] = a[j];
     b[i] = -1;
 }
 
 int main(){
     srand(time(0));
 
-    for (auto &x: a) x = rand() % 100;
+    for (auto &x: a) x = rand() % 100 + 1;
     
     // char *ad;
     // int *bd;
@@ -200,7 +204,8 @@ int main(){
             results1 = i;
             break;
         } else {
-            assert(b_pinned[i] < 50);
+            assert(b_pinned[i] <= 50);
+            assert(b_pinned[i] > 0);
         }
     }
     // int results = N;
@@ -216,7 +221,8 @@ int main(){
             results2 = i;
             break;
         } else {
-            assert(b[i] < 50);
+            assert(b[i] <= 50);
+            assert(b[i] > 0);
         }
     }
     // cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
