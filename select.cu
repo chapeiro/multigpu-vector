@@ -4,10 +4,12 @@
 #include <iomanip>
 #include <chrono>
 #include <cassert>
+#include <cstring>
+#include <algorithm>
 
 using namespace std;
 
-const int N = 10000*2*1024*4;
+const int N = 10000*1024*4;
 
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true){
@@ -19,7 +21,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 #define WARPSIZE (32)
 
-#if __CUDA_ARCH__ < 300
+#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
 #define BRDCSTMEM(dimBlock) (dimBlock.x / WARPSIZE)
 #else
 #define BRDCSTMEM(dimBlock) (0)
@@ -35,15 +37,15 @@ extern __shared__ int32_t s[];
 __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *Nres = NULL){
     int32_t *input  = (int32_t *) (s               );
     int32_t *output = (int32_t *) (s + 4*blockDim.x);
-#if __CUDA_ARCH__ < 300
-    int32_t *bcount = (int32_t *) (s + 9*blockDim.x);
+#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
+    volatile int32_t *bcount = (int32_t *) (s + 9*blockDim.x);
 #endif
     int32_t *elems  = (int32_t *) (s + 9*blockDim.x+BRDCSTMEM(blockDim));
 
     int32_t i       = threadIdx.x;
     int32_t laneid  = i % warpSize;
 
-#if __CUDA_ARCH__ < 300
+#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
     int32_t warpid  = i / warpSize;
 #endif
     int32_t prevwrapmask = (1 << laneid) - 1;
@@ -85,7 +87,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
             if (filterout >= 4*warpSize){
                 // if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
                 // int32_t elems_old              = bcount[warpid];
-#if __CUDA_ARCH__ < 300
+#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
                 if (laneid == 0) bcount[warpid] = atomicAdd(elems, 4*warpSize);
                 int32_t elems_old = bcount[warpid];
 #else
@@ -95,6 +97,8 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
 #endif
                 vec4 tmp_out;
                 for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = output[k*blockDim.x + i];
+                for (int k = 0 ; k < 4 ; ++k) assert(tmp_out.i[k] > 0);
+                for (int k = 0 ; k < 4 ; ++k) assert(tmp_out.i[k] <= 50);
                 reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
                 // b_dev[elems_old + laneid]      = output[i];
                 output[i]                      = output[i + 4*blockDim.x];
@@ -112,13 +116,15 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
     if (laneid == 0) tmp = atomicAdd(elems, filterout);
     int32_t elems_old = __shfl(tmp, 0);
 #endif
-    int32_t j = laneid;
-    while (j < filterout) {
-        b_dev[elems_old + j] = output[i];
-        j                   += warpSize;
+    int32_t k = 0;
+    while (laneid + k * warpSize < filterout) {
+        assert(output[i + k*blockDim.x] > 0);
+        assert(output[i + k*blockDim.x] <= 50);
+        b_dev[elems_old + laneid + k * warpSize] = output[i + k*blockDim.x];
+        ++k;
     }
-    
-    __syncthreads();
+
+    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
     if (i == 0) b_dev[*elems] = -1;
 }
 
@@ -160,7 +166,7 @@ int main(){
     cudaEventCreate(&stop1);
     cudaEventCreate(&start2);
     cudaEventCreate(&stop2);
-    dim3 dimBlock( 1024, 1 );
+    dim3 dimBlock(1024, 1 );
     dim3 dimGrid( 1, 1 );
 
     cudaMallocHost((void**)&a_pinned, N*sizeof(int32_t));
@@ -198,17 +204,23 @@ int main(){
 
     cudaEventSynchronize(stop);
 
+    cudaDeviceSynchronize();
+#ifndef NDEBUG
     int results1 = N;
     for (int i = 0 ; i < N ; ++i) {
         if (b_pinned[i] == -1) {
             results1 = i;
             break;
         } else {
-            assert(b_pinned[i] <= 50);
-            assert(b_pinned[i] > 0);
+            if (b_pinned[i] <= 0 || b_pinned[i] > 50){
+                cout << b_pinned[i] << " " << i << endl;
+                exit(-2);
+            }
+            // assert(b_pinned[i] <= 50);
+            // assert(b_pinned[i] > 0);
         }
     }
-    // int results = N;
+    int results = N;
     // for (int i = 0 ; i < N ; ++i) {
     //     if (a_pinned[i] == -1) {
     //         results = i;
@@ -225,13 +237,22 @@ int main(){
             assert(b[i] > 0);
         }
     }
-    // cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
+    cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
 
     // assert(results1 == results2);
     if (results1 != results2){
         cout << "Wrong results!!!!!!" << endl;
+    } else {
+        sort(b_pinned, b_pinned + results1);
+        sort(b       , b        + results1);
+        for (int i = 0 ; i < results1 ; ++i){
+            if (b[i] != b_pinned[i]){
+                cout << "Wrong result: " << b_pinned[i] << " (vs " << b[i] << ") @" << i << " !!!!!!" << endl;
+                exit(-1);
+            }
+        }
     }
-
+#endif
     gpu(cudaFreeHost(a_pinned));
     gpu(cudaFreeHost(b_pinned));
 
@@ -252,8 +273,6 @@ int main(){
     
     cudaDeviceSynchronize();
     cudaDeviceReset();
-
-
 
     return EXIT_SUCCESS;
 }
