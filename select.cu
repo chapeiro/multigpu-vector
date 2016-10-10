@@ -34,8 +34,8 @@ union vec4{
 
 extern __shared__ int32_t s[];
 
-__global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *Nres = NULL){
-    int32_t *input  = (int32_t *) (s               );
+__global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
+    // int32_t *input  = (int32_t *) (s               );
     int32_t *output = (int32_t *) (s + 4*blockDim.x);
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
     volatile int32_t *bcount = (int32_t *) (s + 9*blockDim.x);
@@ -55,6 +55,8 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
     if (i == 0) *elems = 0;
     __syncthreads();
     
+    volatile int32_t *wrapoutput = output + 5 * warpSize * warpid;
+
     //read from global memory
     for (int j = 0 ; j < N ; j += 4*blockDim.x){
         bool predicate[4] = {false, false, false, false};
@@ -79,7 +81,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
             //compute position of result
             if (predicate[k]){
                 int32_t offset = filterout + __popc(filter & prevwrapmask);
-                output[(offset % warpSize) + (offset/warpSize)*blockDim.x + warpid * warpSize] = tmp.i[k];//input[blockDim.x*k + i];
+                wrapoutput[offset] = tmp.i[k];//input[blockDim.x*k + i];
             }
 
             filterout += newpop;
@@ -96,12 +98,10 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
                 int32_t elems_old = __shfl(tmp, 0);
 #endif
                 vec4 tmp_out;
-                for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = output[k*blockDim.x + i];
-                for (int k = 0 ; k < 4 ; ++k) assert(tmp_out.i[k] > 0);
-                for (int k = 0 ; k < 4 ; ++k) assert(tmp_out.i[k] <= 50);
+                for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = wrapoutput[k*warpSize + laneid];
                 reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
                 // b_dev[elems_old + laneid]      = output[i];
-                output[i]                      = output[i + 4*blockDim.x];
+                wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                 filterout                     -= 4*warpSize;
             }
         }
@@ -118,9 +118,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
 #endif
     int32_t k = 0;
     while (laneid + k * warpSize < filterout) {
-        assert(output[i + k*blockDim.x] > 0);
-        assert(output[i + k*blockDim.x] <= 50);
-        b_dev[elems_old + laneid + k * warpSize] = output[i + k*blockDim.x];
+        b_dev[elems_old + laneid + k * warpSize] = wrapoutput[k*warpSize + laneid];
         ++k;
     }
 
@@ -128,8 +126,8 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
     if (i == 0) b_dev[*elems] = -1;
 }
 
-int32_t a[N];
-int32_t b[N];
+int32_t *a;
+int32_t *b;
 
 void stable_select_cpu(int32_t *a, int32_t *b, int N){
     int i = 0;
@@ -140,7 +138,10 @@ void stable_select_cpu(int32_t *a, int32_t *b, int N){
 int main(){
     srand(time(0));
 
-    for (auto &x: a) x = rand() % 100 + 1;
+    a = (int32_t*) malloc(N*sizeof(int32_t));
+    b = (int32_t*) malloc(N*sizeof(int32_t));
+
+    for (int i = 0 ; i < N ; ++i) a[i] = rand() % 100 + 1;
     
     // char *ad;
     // int *bd;
@@ -176,22 +177,25 @@ int main(){
 
     memcpy(a_pinned, a, N*sizeof(int32_t));
 
-    gpu(cudaMalloc( (void**)&a_dev, N*sizeof(int32_t)));
-    gpu(cudaMalloc( (void**)&b_dev, N*sizeof(int32_t)));
-
+#ifndef NTESTUVA
     cudaEventRecord(start1);
-    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N, res0);
+    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
 #endif
     cudaEventRecord(stop1);
+#endif
+
+#ifndef NTESTMEMCPY
+    gpu(cudaMalloc( (void**)&a_dev, N*sizeof(int32_t)));
+    gpu(cudaMalloc( (void**)&b_dev, N*sizeof(int32_t)));
 
     cudaEventRecord(start);
     gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
     cout << (3 * dimBlock.x + (dimBlock.x / WARPSIZE) + 1)*sizeof(int32_t) << endl;
     cudaEventRecord(start2);
-    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N, res1);
+    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
@@ -201,32 +205,12 @@ int main(){
     cudaEventRecord(stop);
     gpu(cudaFree(a_dev));
     gpu(cudaFree(b_dev));
+#endif
 
     cudaEventSynchronize(stop);
 
     cudaDeviceSynchronize();
 #ifndef NDEBUG
-    int results1 = N;
-    for (int i = 0 ; i < N ; ++i) {
-        if (b_pinned[i] == -1) {
-            results1 = i;
-            break;
-        } else {
-            if (b_pinned[i] <= 0 || b_pinned[i] > 50){
-                cout << b_pinned[i] << " " << i << endl;
-                exit(-2);
-            }
-            // assert(b_pinned[i] <= 50);
-            // assert(b_pinned[i] > 0);
-        }
-    }
-    int results = N;
-    // for (int i = 0 ; i < N ; ++i) {
-    //     if (a_pinned[i] == -1) {
-    //         results = i;
-    //         break;
-    //     }
-    // }
     int results2 = N;
     for (int i = 0 ; i < N ; ++i) {
         if (b[i] == -1) {
@@ -237,6 +221,34 @@ int main(){
             assert(b[i] > 0);
         }
     }
+#ifndef NTESTUVA
+    int results1 = N;
+    for (int i = 0 ; i < N ; ++i) {
+        if (b_pinned[i] == -1) {
+            results1 = i;
+            break;
+        } else {
+            if (b_pinned[i] <= 0 || b_pinned[i] > 50){
+                cout << b_pinned[i] << " " << i << endl;
+            }
+            assert(b_pinned[i] <= 50);
+            assert(b_pinned[i] > 0);
+        }
+    }
+#else
+    int results1 = results2;
+#endif
+#ifndef NTESTMEMCPY
+    int results = N;
+    for (int i = 0 ; i < N ; ++i) {
+        if (a_pinned[i] == -1) {
+            results = i;
+            break;
+        }
+    }
+#else
+    int results = results2;
+#endif
     cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
 
     // assert(results1 == results2);
