@@ -22,9 +22,9 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 #define WARPSIZE (32)
 
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
-#define BRDCSTMEM(dimBlock) (dimBlock.x / WARPSIZE)
+#define BRDCSTMEM(blockDim) ((blockDim.x * blockDim.y)/ WARPSIZE)
 #else
-#define BRDCSTMEM(dimBlock) (0)
+#define BRDCSTMEM(blockDim) (0)
 #endif
 
 union vec4{
@@ -36,13 +36,14 @@ extern __shared__ int32_t s[];
 
 __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     // int32_t *input  = (int32_t *) (s               );
-    int32_t *output = (int32_t *) (s + 4*blockDim.x);
+    int32_t width = blockDim.x * blockDim.y;
+    int32_t *output = (int32_t *) (s + 4*width);
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
-    volatile int32_t *bcount = (int32_t *) (s + 9*blockDim.x);
+    volatile int32_t *bcount = (int32_t *) (s + 9*width);
 #endif
-    int32_t *elems  = (int32_t *) (s + 9*blockDim.x+BRDCSTMEM(blockDim));
+    int32_t *elems  = (int32_t *) (s + 9*width+BRDCSTMEM(blockDim));
 
-    int32_t i       = threadIdx.x;
+    int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
     int32_t laneid  = i % warpSize;
 
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
@@ -58,9 +59,10 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     volatile int32_t *wrapoutput = output + 5 * warpSize * warpid;
 
     //read from global memory
-    for (int j = 0 ; j < N/4 ; j += blockDim.x){
+    for (int j = 0 ; j < N/4 ; j += width){
         bool predicate[4] = {false, false, false, false};
         vec4 tmp = reinterpret_cast<vec4*>(a_dev)[i+j];
+
         #pragma unroll
         for (int k = 0 ; k < 4 ; ++k){
             if (4*(i+j)+k < N){
@@ -177,7 +179,7 @@ int main(){
 
 #ifndef NTESTUVA
     cudaEventRecord(start1);
-    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
+    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
@@ -193,9 +195,9 @@ int main(){
 
     cudaEventRecord(start);
     gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
-    cout << (3 * dimBlock.x + (dimBlock.x / WARPSIZE) + 1)*sizeof(int32_t) << endl;
+    cout << (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t) << endl;
     cudaEventRecord(start2);
-    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N);
+    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
