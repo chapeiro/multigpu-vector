@@ -58,12 +58,12 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     volatile int32_t *wrapoutput = output + 5 * warpSize * warpid;
 
     //read from global memory
-    for (int j = 0 ; j < N ; j += 4*blockDim.x){
+    for (int j = 0 ; j < N/4 ; j += blockDim.x){
         bool predicate[4] = {false, false, false, false};
-        vec4 tmp = reinterpret_cast<vec4*>(a_dev)[i+j/4];
+        vec4 tmp = reinterpret_cast<vec4*>(a_dev)[i+j];
         #pragma unroll
         for (int k = 0 ; k < 4 ; ++k){
-            if (4*i+j+k < N){
+            if (4*(i+j)+k < N){
                 // input[blockDim.x*k + i] = tmp.i[k];
 
                 //compute predicate
@@ -158,8 +158,8 @@ int main(){
         millis = chrono::duration<double, milli>(diff).count();
         cout << millis << " ms" << endl;
     }
-    int32_t *a_pinned, *a_dev;
-    int32_t *b_pinned, *b_dev, *res0, *res1;
+    int32_t *a_pinned;
+    int32_t *b_pinned;
     cudaEvent_t start, stop, start1, stop1, start2, stop2;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -172,8 +172,6 @@ int main(){
 
     cudaMallocHost((void**)&a_pinned, N*sizeof(int32_t));
     cudaMallocHost((void**)&b_pinned, N*sizeof(int32_t));
-    gpu(cudaMalloc((void**)&res0, sizeof(int32_t)));
-    gpu(cudaMalloc((void**)&res1, sizeof(int32_t)));
 
     memcpy(a_pinned, a, N*sizeof(int32_t));
 
@@ -188,6 +186,8 @@ int main(){
 #endif
 
 #ifndef NTESTMEMCPY
+    int32_t *a_dev, *b_dev;
+
     gpu(cudaMalloc( (void**)&a_dev, N*sizeof(int32_t)));
     gpu(cudaMalloc( (void**)&b_dev, N*sizeof(int32_t)));
 
