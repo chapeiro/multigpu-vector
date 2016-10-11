@@ -9,7 +9,7 @@
 
 using namespace std;
 
-const int N = 10000*1024*4;
+const int N = 1*1024*4;
 
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true){
@@ -33,17 +33,21 @@ union vec4{
 };
 
 extern __shared__ int32_t s[];
+__device__ int32_t cnt = 0;
 
 __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     // int32_t *input  = (int32_t *) (s               );
     int32_t width = blockDim.x * blockDim.y;
-    int32_t *output = (int32_t *) (s + 4*width);
+    int32_t gridwidth = gridDim.x * gridDim.y;
+    int32_t bigwidth = width * gridwidth;
+    volatile int32_t *output = (int32_t *) (s + 4*width);
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
     volatile int32_t *bcount = (int32_t *) (s + 9*width);
 #endif
-    int32_t *elems  = (int32_t *) (s + 9*width+BRDCSTMEM(blockDim));
+    int32_t *elems  = &cnt;//(int32_t *) (s + 9*width+BRDCSTMEM(blockDim));
 
     int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
+    int32_t blocki  = blockIdx.x  +  blockIdx.y *  gridDim.x;
     int32_t laneid  = i % warpSize;
 
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
@@ -53,21 +57,22 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
 
     int32_t filterout = 0;
 
-    if (i == 0) *elems = 0;
+    // if (i == 0) *elems = 0;
     __syncthreads();
     
     volatile int32_t *wrapoutput = output + 5 * warpSize * warpid;
 
     //read from global memory
-    for (int j = 0 ; j < N/4 ; j += width){
+    for (int j = 0 ; j < N/4 ; j += bigwidth){
         bool predicate[4] = {false, false, false, false};
-        vec4 tmp = reinterpret_cast<vec4*>(a_dev)[i+j];
+        vec4 tmp = reinterpret_cast<vec4*>(a_dev)[i+j+blocki*width];
 
         #pragma unroll
         for (int k = 0 ; k < 4 ; ++k){
-            if (4*(i+j)+k < N){
+            if (4*(i+j+blocki*width)+k < N){
                 // input[blockDim.x*k + i] = tmp.i[k];
-
+                assert(tmp.i[k] > 0);
+                assert(tmp.i[k] <= 100);
                 //compute predicate
                 predicate[k] = tmp.i[k] <= 50;
             }
@@ -100,7 +105,8 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
                 int32_t elems_old = __shfl(tmp, 0);
 #endif
                 vec4 tmp_out;
-                for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = wrapoutput[k*warpSize + laneid];
+                #pragma unroll
+                for (int m = 0 ; m < 4 ; ++m) tmp_out.i[m] = wrapoutput[m*warpSize + laneid];
                 reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
                 // b_dev[elems_old + laneid]      = output[i];
                 wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
@@ -108,7 +114,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
             }
         }
     }
-    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
+    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned (and also vectorizable, aligned to vec4)
 
 #if __CUDA_ARCH__ < 300
     if (laneid == 0) bcount[warpid] = atomicAdd(elems, filterout);
@@ -124,8 +130,11 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
         ++k;
     }
 
-    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
-    if (i == 0) b_dev[*elems] = -1;
+    // __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
+    // if (i == 0) b_dev[*elems] = -1;
+
+    if (laneid == 0) printf("%d\n", *elems);
+    __syncthreads();
 }
 
 int32_t *a;
@@ -169,15 +178,17 @@ int main(){
     cudaEventCreate(&stop1);
     cudaEventCreate(&start2);
     cudaEventCreate(&stop2);
-    dim3 dimBlock(1024, 1 );
-    dim3 dimGrid( 1, 1 );
+    dim3 dimBlock(32, 1 );
+    dim3 dimGrid( 2, 1 );
 
     cudaMallocHost((void**)&a_pinned, N*sizeof(int32_t));
     cudaMallocHost((void**)&b_pinned, N*sizeof(int32_t));
 
     memcpy(a_pinned, a, N*sizeof(int32_t));
 
+    int32_t zero = 0;
 #ifndef NTESTUVA
+    gpu(cudaMemcpyToSymbol(cnt, &zero, sizeof(int32_t)));
     cudaEventRecord(start1);
     unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
 #ifndef NDEBUG
@@ -187,6 +198,11 @@ int main(){
     cudaEventRecord(stop1);
 #endif
 
+    cudaDeviceSynchronize();
+    int32_t t1;
+    gpu(cudaMemcpyFromSymbol(&t1, cnt, sizeof(int32_t)));
+
+    cudaDeviceSynchronize();
 #ifndef NTESTMEMCPY
     int32_t *a_dev, *b_dev;
 
@@ -194,6 +210,7 @@ int main(){
     gpu(cudaMalloc( (void**)&b_dev, N*sizeof(int32_t)));
 
     cudaEventRecord(start);
+    gpu(cudaMemcpyToSymbol(cnt, &zero, sizeof(int32_t)));
     gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
     cout << (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + 1)*sizeof(int32_t) << endl;
     cudaEventRecord(start2);
@@ -212,6 +229,10 @@ int main(){
     cudaEventSynchronize(stop);
 
     cudaDeviceSynchronize();
+    int32_t t;
+    gpu(cudaMemcpyFromSymbol(&t, cnt, sizeof(int32_t)));
+    cudaDeviceSynchronize();
+    cout << zero << endl;
 #ifndef NDEBUG
     int results2 = N;
     for (int i = 0 ; i < N ; ++i) {
@@ -224,8 +245,8 @@ int main(){
         }
     }
 #ifndef NTESTUVA
-    int results1 = N;
-    for (int i = 0 ; i < N ; ++i) {
+    int results1 = t1;
+    for (int i = 0 ; i < results1 ; ++i) {
         if (b_pinned[i] == -1) {
             results1 = i;
             break;
@@ -233,25 +254,32 @@ int main(){
             if (b_pinned[i] <= 0 || b_pinned[i] > 50){
                 cout << b_pinned[i] << " " << i << endl;
             }
-            assert(b_pinned[i] <= 50);
-            assert(b_pinned[i] > 0);
+            // assert(b_pinned[i] <= 50);
+            // assert(b_pinned[i] > 0);
         }
     }
 #else
     int results1 = results2;
 #endif
 #ifndef NTESTMEMCPY
-    int results = N;
-    for (int i = 0 ; i < N ; ++i) {
+    int results = t;
+    for (int i = 0 ; i < results ; ++i) {
         if (a_pinned[i] == -1) {
             results = i;
             break;
+        } else {
+            if (a_pinned[i] <= 0 || a_pinned[i] > 50){
+                cout << a_pinned[i] << " " << i << endl;
+            }
+            // assert(a_pinned[i] <= 50);
+            // assert(a_pinned[i] > 0);
         }
     }
 #else
     int results = results2;
 #endif
     cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
+    cout << results << " " << t << " " << results2 << " " << a_pinned[4] << endl;
 
     // assert(results1 == results2);
     if (results1 != results2){
