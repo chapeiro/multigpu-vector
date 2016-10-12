@@ -39,12 +39,12 @@ extern __shared__ int32_t s[];
 __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     // int32_t *input  = (int32_t *) (s               );
     int32_t width = blockDim.x * blockDim.y;
-    int32_t *output = (int32_t *) (s + 4*width);
+    int32_t *output = (int32_t *) (s );//+ 4*width);
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
-    volatile int32_t *bcount = (int32_t *) (s + 9*width);
+    volatile int32_t *bcount = (int32_t *) (s + 8*width);
 #endif
-    volatile int32_t *fcount = (int32_t *) (s + 9*width+((blockDim.x * blockDim.y)/ WARPSIZE));
-    int32_t *elems  = (int32_t *) (s + 9*width+BRDCSTMEM(blockDim)+((blockDim.x * blockDim.y)/ WARPSIZE));
+    volatile int32_t *fcount = (int32_t *) (s + 8*width+((blockDim.x * blockDim.y)/ WARPSIZE));
+    int32_t *elems  = (int32_t *) (s + 8*width+BRDCSTMEM(blockDim)+((blockDim.x * blockDim.y)/ WARPSIZE));
 
     int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
     int32_t laneid  = i % warpSize;
@@ -59,7 +59,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
     if (i == 0) *elems = 0;
     __syncthreads();
     
-    volatile int32_t *wrapoutput = output + 5 * warpSize * warpid;
+    volatile int32_t *wrapoutput = output + 8 * warpSize * warpid;
 
     //read from global memory
     for (int j = 0 ; j < N/4 ; j += width){
@@ -90,10 +90,55 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
             }
 
             filterout += newpop;
+        }
 
+        if (filterout >= 4*warpSize){
+            // if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
+            // int32_t elems_old              = bcount[warpid];
+#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
+            if (laneid == 0) bcount[warpid] = atomicAdd(elems, 4*warpSize);
+            int32_t elems_old = bcount[warpid];
+#else
+            int32_t tmp;
+            if (laneid == 0) tmp = atomicAdd(elems, 4*warpSize);
+            int32_t elems_old = __shfl(tmp, 0);
+#endif
+            vec4 tmp_out;
+            for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = wrapoutput[k*warpSize + laneid];
+            reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
+            // reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = reinterpret_cast<vec4*>((int32_t *) wrapoutput)[laneid];
+            // b_dev[elems_old + laneid]      = output[i];
+            for (int k = 0 ; k < 4 ; ++k) wrapoutput[laneid + k*warpSize] = wrapoutput[laneid + (k+4)*warpSize];
+            filterout                     -= 4*warpSize;
+        }
+    }
+    if (laneid == 0) fcount[warpid] = filterout;
+    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
+
+    for (int32_t m = 1 ; m <= 5 ; ++m){
+        int32_t mask = (1 << m) - 1;
+        if (!(warpid & mask)){
+            int32_t target_wrapid               = warpid + (1 << (m - 1));
+            int32_t target_filter_out           = fcount[target_wrapid];
+            // int32_t target_filter_out_rem       = target_filter_out;
+
+            volatile int32_t *target_wrapoutput = output + 8 * warpSize * target_wrapid;
+
+            for (int k = 0 ; k < 4 ; ++k) {
+                wrapoutput[filterout + laneid + k * warpSize] = target_wrapoutput[laneid + k * warpSize];
+            }
+            
+            // for (int32_t k = 0; k < (target_filter_out + warpSize - 1)/warpSize ; ++k){
+            //     if (laneid + k * warpSize < target_filter_out) {
+            //     }
+            //     int32_t delta = min(target_filter_out_rem, warpSize);
+            //     target_filter_out_rem -= delta;
+            //     filterout += delta;
+            // }
+            filterout += target_filter_out;
             if (filterout >= 4*warpSize){
-                // if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
-                // int32_t elems_old              = bcount[warpid];
+            // if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
+            // int32_t elems_old              = bcount[warpid];
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
                 if (laneid == 0) bcount[warpid] = atomicAdd(elems, 4*warpSize);
                 int32_t elems_old = bcount[warpid];
@@ -106,49 +151,16 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N){
                 for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = wrapoutput[k*warpSize + laneid];
                 reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
                 // b_dev[elems_old + laneid]      = output[i];
-                wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
+                for (int k = 0 ; k < 4 ; ++k) wrapoutput[laneid + k*warpSize] = wrapoutput[laneid + (k+4)*warpSize];
                 filterout                     -= 4*warpSize;
-            }
-        }
-    }
-    if (laneid == 0) fcount[warpid] = filterout;
-    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
 
-    for (int32_t m = 1 ; m <= 5 ; ++m){
-        int32_t mask = (1 << m) - 1;
-        if (!(warpid & mask)){
-            int32_t target_wrapid               = warpid + (1 << (m - 1));
-            int32_t target_filter_out           = fcount[target_wrapid];
-            int32_t target_filter_out_rem       = target_filter_out;
 
-            volatile int32_t *target_wrapoutput = output + 5 * warpSize * target_wrapid;
-
-            for (int32_t k = 0; k < (target_filter_out + warpSize - 1)/warpSize ; ++k){
-                if (laneid + k * warpSize < target_filter_out) {
-                    wrapoutput[filterout + laneid] = target_wrapoutput[laneid + k * warpSize];
-                }
-                int32_t delta = min(target_filter_out_rem, warpSize);
-                target_filter_out_rem -= delta;
-                filterout += delta;
-
-                if (filterout >= 4*warpSize){
-                // if (laneid == 0) bcount[warpid] = atomicAdd(elems, warpSize);
-                // int32_t elems_old              = bcount[warpid];
-#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
-                    if (laneid == 0) bcount[warpid] = atomicAdd(elems, 4*warpSize);
-                    int32_t elems_old = bcount[warpid];
-#else
-                    int32_t tmp;
-                    if (laneid == 0) tmp = atomicAdd(elems, 4*warpSize);
-                    int32_t elems_old = __shfl(tmp, 0);
-#endif
-                    vec4 tmp_out;
-                    for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = wrapoutput[k*warpSize + laneid];
-                    reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
-                    // b_dev[elems_old + laneid]      = output[i];
-                    wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
-                    filterout                     -= 4*warpSize;
-                }
+                // vec4 tmp_out;
+                // for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = wrapoutput[k*warpSize + laneid];
+                // reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
+                // // b_dev[elems_old + laneid]      = output[i];
+                // wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
+                // filterout                     -= 4*warpSize;
             }
             fcount[warpid] = filterout;
         }
@@ -220,9 +232,11 @@ int main(){
 
     memcpy(a_pinned, a, N*sizeof(int32_t));
 
+    cout << (8 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + ((dimBlock.x * dimBlock.y)/ WARPSIZE) + 1)*sizeof(int32_t) << endl;
+    
 #ifndef NTESTUVA
     cudaEventRecord(start1);
-    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + ((dimBlock.x * dimBlock.y)/ WARPSIZE) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
+    unstable_select<<<dimGrid, dimBlock, (8 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + ((dimBlock.x * dimBlock.y)/ WARPSIZE) + 1)*sizeof(int32_t)>>>(a_pinned, b_pinned, N);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
@@ -238,9 +252,8 @@ int main(){
 
     cudaEventRecord(start);
     gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
-    cout << (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + ((dimBlock.x * dimBlock.y)/ WARPSIZE) + 1)*sizeof(int32_t) << endl;
     cudaEventRecord(start2);
-    unstable_select<<<dimGrid, dimBlock, (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + ((dimBlock.x * dimBlock.y)/ WARPSIZE) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N);
+    unstable_select<<<dimGrid, dimBlock, (8 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + ((dimBlock.x * dimBlock.y)/ WARPSIZE) + 1)*sizeof(int32_t)>>>(a_dev, b_dev, N);
 #ifndef NDEBUG
     gpu( cudaPeekAtLastError() );
     gpu( cudaDeviceSynchronize() );
