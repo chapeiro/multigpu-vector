@@ -36,7 +36,9 @@ extern __shared__ int32_t s[];
 
 template<typename T>
 __device__ __host__ inline T round_up(T num, T mult){
-    return (((num + mult - 1) / mult) * mult);
+    T rem = num % mult;
+    if (rem == 0) return num;
+    return num + mult - rem;
 }
 
 
@@ -171,10 +173,8 @@ __global__ void unstable_select(int32_t *src, int32_t *dst, int N, int32_t *buff
 #endif
         int32_t * buffoff = buffer  + elems_old;
         int32_t * aligned = (int32_t *) round_up((uintptr_t) buffoff, warpSize * sizeof(int32_t));
-        int32_t preamble  = aligned - buffoff;
+        int32_t preamble  = min((int32_t) (aligned - buffoff), filterout);
         int32_t rem_elems = filterout - preamble;
-
-        assert(preamble < warpSize);
 
         if (laneid < preamble){
             buffoff[laneid] = wrapoutput[laneid];
