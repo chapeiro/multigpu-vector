@@ -34,16 +34,11 @@ union vec4{
 
 extern __shared__ int32_t s[];
 
-// __device__ int32_t cnt;
-
-// __device__ int32_t buffer_size;
-// __device__ int32_t output_size;
-
-__global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size){
+__global__ void unstable_select(int32_t *src, int32_t *dst, int N, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size){
     // int32_t *input  = (int32_t *) (s               );
-    int32_t width = blockDim.x * blockDim.y;
-    int32_t gridwidth = gridDim.x * gridDim.y;
-    int32_t bigwidth = width * gridwidth;
+    const int32_t width = blockDim.x * blockDim.y;
+    const int32_t gridwidth = gridDim.x * gridDim.y;
+    const int32_t bigwidth = width * gridwidth;
     volatile int32_t *output = (int32_t *) (s + 4*width);
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
     volatile int32_t *bcount = (int32_t *) (s + 9*width);
@@ -51,14 +46,14 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
     volatile int32_t *fcount = (int32_t *) (s + 9*width+BRDCSTMEM(blockDim));
     uint32_t *elems  = output_size;//(int32_t *) (s + 9*width+BRDCSTMEM(blockDim)+((blockDim.x * blockDim.y)/ WARPSIZE));
 
-    int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
-    int32_t blocki  = blockIdx.x  +  blockIdx.y *  gridDim.x;
-    int32_t laneid  = i % warpSize;
+    const int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
+    const int32_t blocki  = blockIdx.x  +  blockIdx.y *  gridDim.x;
+    const int32_t laneid  = i % warpSize;
 
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
-    int32_t warpid  = i / warpSize;
+    const int32_t warpid  = i / warpSize;
 #endif
-    int32_t prevwrapmask = (1 << laneid) - 1;
+    const int32_t prevwrapmask = (1 << laneid) - 1;
 
     int32_t filterout = 0;
 
@@ -67,7 +62,7 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
     //read from global memory
     for (int j = 0 ; j < N/4 ; j += bigwidth){
         bool predicate[4] = {false, false, false, false};
-        vec4 tmp = reinterpret_cast<vec4*>(a_dev)[i+j+blocki*width];
+        vec4 tmp = reinterpret_cast<vec4*>(src)[i+j+blocki*width];
 
         #pragma unroll
         for (int k = 0 ; k < 4 ; ++k){
@@ -108,15 +103,15 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
                 vec4 tmp_out;
                 #pragma unroll
                 for (int m = 0 ; m < 4 ; ++m) tmp_out.i[m] = wrapoutput[m*warpSize + laneid];
-                reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
-                // b_dev[elems_old + laneid]      = output[i];
+                reinterpret_cast<vec4*>(dst)[elems_old/4 + laneid] = tmp_out;
+                // dst[elems_old + laneid]      = output[i];
                 wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                 filterout                     -= 4*warpSize;
             }
         }
     }
     if (laneid == 0) fcount[warpid] = filterout;
-    __syncthreads(); //this is needed to guarantee that all previous writes to b_dev are aligned
+    __syncthreads(); //this is needed to guarantee that all previous writes to dst are aligned
 
     for (int32_t m = 1 ; m <= 5 ; ++m){
         int32_t mask = (1 << m) - 1;
@@ -148,8 +143,8 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
 #endif
                     vec4 tmp_out;
                     for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = wrapoutput[k*warpSize + laneid];
-                    reinterpret_cast<vec4*>(b_dev)[elems_old/4 + laneid] = tmp_out;
-                    // b_dev[elems_old + laneid]      = output[i];
+                    reinterpret_cast<vec4*>(dst)[elems_old/4 + laneid] = tmp_out;
+                    // dst[elems_old + laneid]      = output[i];
                     wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                     filterout                     -= 4*warpSize;
                 }
@@ -168,9 +163,18 @@ __global__ void unstable_select(int32_t *a_dev, int32_t *b_dev, int N, int32_t *
         if (laneid == 0) tmp = atomicAdd(buffer_size, filterout);
         int32_t elems_old = __shfl(tmp, 0);
 #endif
-        for (int32_t k = 0; k < (filterout + warpSize - 1) / warpSize ; ++k){
-            if (laneid + k * warpSize < filterout){
-                buffer[elems_old + laneid + k * warpSize] = wrapoutput[k*warpSize + laneid];
+        int32_t * buffoff = buffer  + elems_old;
+        int32_t * aligned = (int32_t *) ((((uintptr_t) (buffoff + warpSize - 1)) / (warpSize * sizeof(int32_t))) * (warpSize * sizeof(int32_t)));
+        int32_t preamble  = aligned - buffoff;
+        int32_t rem_elems = filterout - preamble;
+
+        if (laneid < preamble){
+            buffer[elems_old + laneid] = wrapoutput[laneid];
+        }
+
+        for (int32_t k = 0; k < (rem_elems + warpSize - 1) / warpSize ; ++k){
+            if (laneid + k * warpSize < rem_elems){
+                aligned[laneid + k * warpSize] = wrapoutput[preamble + laneid + k*warpSize];
             }
         }
 
