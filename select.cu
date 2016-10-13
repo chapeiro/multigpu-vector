@@ -34,6 +34,12 @@ union vec4{
 
 extern __shared__ int32_t s[];
 
+template<typename T>
+__device__ __host__ inline T round_up(T num, T mult){
+    return (((num + mult - 1) / mult) * mult);
+}
+
+
 __global__ void unstable_select(int32_t *src, int32_t *dst, int N, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size){
     // int32_t *input  = (int32_t *) (s               );
     const int32_t width = blockDim.x * blockDim.y;
@@ -164,18 +170,18 @@ __global__ void unstable_select(int32_t *src, int32_t *dst, int N, int32_t *buff
         int32_t elems_old = __shfl(tmp, 0);
 #endif
         int32_t * buffoff = buffer  + elems_old;
-        int32_t * aligned = (int32_t *) ((((uintptr_t) (buffoff + warpSize - 1)) / (warpSize * sizeof(int32_t))) * (warpSize * sizeof(int32_t)));
+        int32_t * aligned = (int32_t *) round_up((uintptr_t) buffoff, warpSize * sizeof(int32_t));
         int32_t preamble  = aligned - buffoff;
         int32_t rem_elems = filterout - preamble;
 
+        assert(preamble < warpSize);
+
         if (laneid < preamble){
-            buffer[elems_old + laneid] = wrapoutput[laneid];
+            buffoff[laneid] = wrapoutput[laneid];
         }
 
-        for (int32_t k = 0; k < (rem_elems + warpSize - 1) / warpSize ; ++k){
-            if (laneid + k * warpSize < rem_elems){
-                aligned[laneid + k * warpSize] = wrapoutput[preamble + laneid + k*warpSize];
-            }
+        for (int32_t k = laneid; k < rem_elems ; k += warpSize){
+            aligned[k] = wrapoutput[preamble + k];
         }
 
         // // assert(filterout < 4*warpSize);
