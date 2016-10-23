@@ -45,7 +45,6 @@ __device__ __forceinline__ T broadcast(T val, uint32_t src){
    #define broadcast(v, l) (__shfl(v, l))
 #endif
 
-
 __device__ __forceinline__ void push_results(volatile int32_t *src, int32_t *dst, uint32_t* elems){
     uint32_t laneid;
     asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
