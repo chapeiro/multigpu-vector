@@ -8,14 +8,6 @@
 
 using namespace std;
 
-#define WARPSIZE (32)
-
-#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
-#define BRDCSTMEM(blockDim) ((blockDim.x * blockDim.y)/ WARPSIZE)
-#else
-#define BRDCSTMEM(blockDim) (0)
-#endif
-
 union vec4{
     int4 vec;
     int  i[4];
@@ -26,6 +18,11 @@ extern __shared__ int32_t s[];
 template<typename T>
 __device__ __host__ inline constexpr T round_up(T num, T mult){
     return ((num + mult - 1) / mult) * mult;
+}
+
+template<typename T>
+__device__ __host__ inline constexpr T round_down(T num, T mult){
+    return (num / mult) * mult;
 }
 
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
@@ -59,7 +56,7 @@ __device__ __forceinline__ void push_results(volatile int32_t *src, int32_t *dst
     reinterpret_cast<vec4*>(dst)[elems_old/4 + laneid] = tmp_out;
 }
 
-__global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_t *dst, int N, int32_t pred, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size){
+__global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_t *dst, int N, int32_t pred, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size, uint32_t *finished){
     // int32_t *input  = (int32_t *) (s               );
     const int32_t width = blockDim.x * blockDim.y;
     const int32_t gridwidth = gridDim.x * gridDim.y;
@@ -168,7 +165,7 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_
             aligned[k] = wrapoutput[preamble + k];
         }
 
-        int32_t * cnts = buffer + ((4*warpSize-1)*gridwidth);
+        int32_t * cnts = buffer + ((4*warpSize-1)*(gridwidth+1));
 
         int32_t bnum0  = elems_old/(4*warpSize);
         int32_t bnum1  = (elems_old + filterout)/(4*warpSize);
@@ -186,53 +183,83 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_
             totcnt1 = broadcast(totcnt1, 0) + nset1;
         }
 
-        if (totcnt0 >= 4*warpSize) push_results(buffer+bnum0*(4*warpSize), dst, elems);
-        if (totcnt1 >= 4*warpSize) push_results(buffer+bnum1*(4*warpSize), dst, elems);
+        if (totcnt0 >= 4*warpSize){
+            assert(totcnt0 <= 4*warpSize);
+            push_results(buffer+bnum0*(4*warpSize), dst, elems);
+            if (laneid == 0) cnts[bnum0] = 0; //clean up for next round
+        }
+        if (totcnt1 >= 4*warpSize){
+            assert(totcnt1 <= 4*warpSize);
+            push_results(buffer+bnum1*(4*warpSize), dst, elems);
+            if (laneid == 0) cnts[bnum1] = 0; //clean up for next round
+        }
     }
-}
+    if (warpid == 0) {
+        int32_t * cnts = buffer + ((4*warpSize-1)*(gridwidth+1));
 
-uint32_t unstable_select_gpu(int32_t *src, int32_t *dst, uint32_t N, int32_t pred, const dim3 &dimGrid, const dim3 &dimBlock, cudaEvent_t &start, cudaEvent_t &stop){
-    int32_t *buffer;
-    int32_t grid_size = dimGrid.x * dimGrid.y * dimGrid.z;
+        int32_t finished_old;
+        if (laneid == 0) finished_old = atomicAdd(finished, 1);
+        finished_old = broadcast(finished_old, 0);
 
-    gpu(cudaMalloc((void**)&buffer, (grid_size * 4 * WARPSIZE + 2)* sizeof(int32_t)));
+        if (finished_old == gridwidth - 1){ //every other block has finished
+            int32_t buffelems = *buffer_size;
+            int32_t start     = round_down(buffelems, 4*warpSize);
+            int32_t *buffstart= buffer + start;
 
-    uint32_t* counters = (uint32_t *) (buffer + grid_size * 4 * WARPSIZE);
-    
-    // initialize global counters
-    gpu(cudaMemset(buffer + grid_size * 4 * WARPSIZE - grid_size, 0, (grid_size + 2) * sizeof(int32_t)));
+            // vec4 tmp_out;
+            #pragma unroll
+            for (int k = 0 ; k < 4 ; ++k) buffer[k*warpSize + laneid] = buffstart[k*warpSize + laneid];
+            // reinterpret_cast<vec4*>(buffer)[laneid] = tmp_out;
 
-    cudaEventRecord(start);
-
-    size_t shared_mem = (9 * dimBlock.x * dimBlock.y + BRDCSTMEM(dimBlock) + ((dimBlock.x * dimBlock.y) / WARPSIZE))*sizeof(int32_t);
-
-    // run kernel
-    unstable_select<<<dimGrid, dimBlock, shared_mem>>>(src, dst, N, pred, buffer, counters, counters+1);
-    
-#ifndef NDEBUG
-    gpu(cudaPeekAtLastError()  );
-    gpu(cudaDeviceSynchronize());
-#endif
-
-    // wait to read counters from device
-    uint32_t h_counters[2];
-    gpu(cudaMemcpy(h_counters, counters, 2 * sizeof(uint32_t), cudaMemcpyDefault));
-    uint32_t h_output_size = h_counters[0];
-    uint32_t h_buffer_end  = h_counters[1];
-    uint32_t h_buffer_start= (h_counters[1]/(4*WARPSIZE))*(4*WARPSIZE);
-    uint32_t h_buffer_size = h_buffer_end - h_buffer_start;
-    assert(h_buffer_start % (4*WARPSIZE) == 0);
-    assert(h_buffer_end >= h_buffer_start);
-    assert(h_buffer_size < 4*WARPSIZE);
-
-    // combine results
-    if (h_buffer_size > 0) cudaMemcpy(dst+h_output_size, buffer+h_buffer_start, h_buffer_size * sizeof(int32_t), cudaMemcpyDefault);
-    cudaEventRecord(stop);
-    return h_output_size + h_buffer_size;
+            if (laneid == 0) {
+                *buffer_size                    = buffelems - start;
+                *finished                       = 0;
+                cnts[buffelems/(4*warpSize)]    = 0;
+                cnts[0]                         = buffelems - start;
+            }
+        }
+    }
 }
 
 void stable_select_cpu(int32_t *a, int32_t *b, int N){
     int i = 0;
     for (int j = 0 ; j < N ; ++j) if (a[j] <= 50) b[i++] = a[j];
     b[i] = -1;
+}
+
+template<size_t warp_size, typename T>
+uint32_t unstable_select_gpu<warp_size, T>::next(T *dst, T *src, uint32_t N){
+    set_device_on_scope d(device);
+    if (!src){
+        uint32_t h_counters[2];
+        gpu(cudaMemcpyAsync(h_counters, counters, 2 * sizeof(uint32_t), cudaMemcpyDefault, stream));
+        gpu(cudaStreamSynchronize(stream));
+        uint32_t h_output_size = h_counters[0];
+        uint32_t h_buffer_end  = h_counters[1];
+        assert(h_buffer_end < 4*WARPSIZE);
+
+        // combine results
+        if (h_buffer_end > 0){
+            cudaMemcpyAsync(dst+h_output_size, buffer, h_buffer_end * sizeof(T), cudaMemcpyDefault, stream);
+            gpu(cudaStreamSynchronize(stream));
+        }
+        return h_output_size + h_buffer_end;
+    }
+    unstable_select<<<dimGrid, dimBlock, shared_mem, stream>>>(src, dst, N, 50, buffer, counters, counters+1, counters+2);
+// #ifndef NDEBUG
+//     gpu(cudaPeekAtLastError()  );
+//     gpu(cudaDeviceSynchronize());
+// #endif
+    return 0;
+}
+
+uint32_t unstable_select_gpu_caller(int32_t *src, int32_t *dst, uint32_t N, int32_t pred, const dim3 &dimGrid, const dim3 &dimBlock, cudaEvent_t &start, cudaEvent_t &stop){
+    unstable_select_gpu<> filter(dimGrid, dimBlock, 0);
+    cudaEventRecord(start, 0);
+    // filter.next(dst, src, N/2);
+    // filter.next(dst, src+N/2, N/2);
+    filter.next(dst, src, N);
+    uint32_t res = filter.next(dst);
+    cudaEventRecord(stop, 0);
+    return res;
 }

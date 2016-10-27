@@ -57,7 +57,7 @@ int main(){
     memcpy(a_pinned, a, N*sizeof(int32_t));
 
 #ifndef NTESTUVA
-    int results1 = unstable_select_gpu(a_pinned, b_pinned, N, 50, dimGrid, dimBlock, start1, stop1);
+    int results1 = unstable_select_gpu_caller(a_pinned, b_pinned, N, 50, dimGrid, dimBlock, start1, stop1);
 #else
     int results1 = 0;
 #endif
@@ -71,7 +71,7 @@ int main(){
     cudaEventRecord(start);
     gpu(cudaMemcpy( a_dev, a_pinned, N*sizeof(int32_t), cudaMemcpyDefault));
     
-    int results2 = unstable_select_gpu(a_dev, b_dev, N, 50, dimGrid, dimBlock, start2, stop2);
+    int results2 = unstable_select_gpu_caller(a_dev, b_dev, N, 50, dimGrid, dimBlock, start2, stop2);
 
     gpu(cudaMemcpy(a_pinned, b_dev, N*sizeof(int32_t), cudaMemcpyDefault));
     cudaEventRecord(stop);

@@ -13,4 +13,28 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
     }
 }
 
+#define WARPSIZE (32)
+
+#if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
+#define BRDCSTMEM(blockDim) ((blockDim.x * blockDim.y)/ WARPSIZE)
+#else
+#define BRDCSTMEM(blockDim) (0)
+#endif
+
+class set_device_on_scope{
+private:
+    int device;
+public:
+    inline set_device_on_scope(int set){
+        gpu(cudaGetDevice(&device));
+        gpu(cudaSetDevice(set));
+    }
+
+    inline ~set_device_on_scope(){
+        gpu(cudaSetDevice(device));
+    }
+};
+
+
+
 #endif /* COMMON_CUH_ */
