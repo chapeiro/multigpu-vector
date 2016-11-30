@@ -56,7 +56,29 @@ __device__ __forceinline__ void push_results(volatile int32_t *src, int32_t *dst
     reinterpret_cast<vec4*>(dst)[elems_old/4 + laneid] = tmp_out;
 }
 
-__global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_t *dst, int N, int32_t pred, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size, uint32_t *finished){
+template<size_t warp_size, typename T>
+__device__ __forceinline__ void unstable_select_gpu<warp_size, T>::push_results(volatile int32_t *src, uint32_t* elems){
+    uint32_t laneid;
+    asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+
+    uint32_t elems_old;
+    if (laneid == 0) elems_old = atomicAdd(elems, 4*warpSize);
+    elems_old = broadcast(elems_old, 0);
+
+    vec4 tmp_out;
+    #pragma unroll
+    for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = src[k*warpSize + laneid];
+
+    if (!output_buffer) output_buffer = buffpool->acquire_buffer_blocked();
+    reinterpret_cast<vec4*>(output_buffer->data)[output_buffer->N/4 + laneid] = tmp_out;
+    if (laneid == 0){
+        output_buffer->N += 4*warpSize;
+        if (output_buffer->full()) output_buffer = buffpool->acquire_buffer_blocked();
+    }
+}
+
+template<size_t warp_size, typename T>
+__global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, unstable_select_gpu<warp_size, T> *dst, int N, int32_t pred, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size, uint32_t *finished){
     // int32_t *input  = (int32_t *) (s               );
     const int32_t width = blockDim.x * blockDim.y;
     const int32_t gridwidth = gridDim.x * gridDim.y;
@@ -109,7 +131,7 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_
             filterout += newpop;
 
             if (filterout >= 4*warpSize){
-                push_results(wrapoutput, dst, elems);
+                dst->push_results(wrapoutput, elems);
 
                 wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                 filterout                     -= 4*warpSize;
@@ -119,11 +141,11 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_
     if (laneid == 0) fcount[warpid] = filterout;
     __syncthreads(); //this is needed to guarantee that all previous writes to dst are aligned
 
-    for (int32_t m = 1 ; m <= 5 ; ++m){
+    for (int32_t m = 1 ; m <= 5 ; ++m){ //fixme: not until 5, but until ceil(log(max warpid)) ? also ceil on target_filter_out condition
         int32_t mask = (1 << m) - 1;
         if (!(warpid & mask)){
             int32_t target_wrapid               = warpid + (1 << (m - 1));
-            int32_t target_filter_out           = fcount[target_wrapid];
+            int32_t target_filter_out           = (target_wrapid < blockDim.x * blockDim.y/warpSize) ? fcount[target_wrapid] : 0;
             int32_t target_filter_out_rem       = target_filter_out;
 
             volatile int32_t *target_wrapoutput = output + 5 * warpSize * target_wrapid;
@@ -137,7 +159,7 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_
                 filterout += delta;
 
                 if (filterout >= 4*warpSize){
-                    push_results(wrapoutput, dst, elems);
+                    dst->push_results(wrapoutput, elems);
 
                     wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                     filterout                     -= 4*warpSize;
@@ -185,12 +207,12 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, int32_
 
         if (totcnt0 >= 4*warpSize){
             assert(totcnt0 <= 4*warpSize);
-            push_results(buffer+bnum0*(4*warpSize), dst, elems);
+            dst->push_results(buffer+bnum0*(4*warpSize), elems);
             if (laneid == 0) cnts[bnum0] = 0; //clean up for next round
         }
         if (totcnt1 >= 4*warpSize){
             assert(totcnt1 <= 4*warpSize);
-            push_results(buffer+bnum1*(4*warpSize), dst, elems);
+            dst->push_results(buffer+bnum1*(4*warpSize), elems);
             if (laneid == 0) cnts[bnum1] = 0; //clean up for next round
         }
     }
@@ -245,7 +267,7 @@ uint32_t unstable_select_gpu<warp_size, T>::next(T *dst, T *src, uint32_t N){
         }
         return h_output_size + h_buffer_end;
     }
-    unstable_select<<<dimGrid, dimBlock, shared_mem, stream>>>(src, dst, N, 50, buffer, counters, counters+1, counters+2);
+    unstable_select<<<dimGrid, dimBlock, shared_mem, stream>>>(src, this, N, 50, buffer, counters, counters+1, counters+2);
 // #ifndef NDEBUG
 //     gpu(cudaPeekAtLastError()  );
 //     gpu(cudaDeviceSynchronize());
