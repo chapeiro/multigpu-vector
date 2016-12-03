@@ -78,13 +78,17 @@ private:
     node_t volatile * node;
 
 public:
-    __host__ lockfree_stack(size_t size, vector<T> fill, int device): data_head(0), free_head(size + 1){
+    __host__ lockfree_stack(size_t size, vector<T> fill, int device){
         set_device_on_scope d(device);
         node = (node_t *) malloc((size+2)*sizeof(node_t));
         node[0].data = invalid_value;
         node[0].next = 0;
         node[1].data = invalid_value;
         node[1].next = 1;
+        data_head.orig.val = 0;
+        data_head.orig.tag = 0;
+        free_head.orig.val = 1;
+        free_head.orig.tag = 1;
 
         for (size_t i = 2 ; i < fill.size() + 2; ++i) {
             node[i].next       = data_head.orig.val;
@@ -116,22 +120,31 @@ private:
         tagged_uint32_t old_head;
         do {
             do head = free_head; while (head.orig.val == 1);
+            assert(head.orig.val != 1);
+            assert(head.orig.val != 0);
+            assert(head.orig.val >  1);
             n_head.orig.val = node[head.orig.val].next;
             n_head.orig.tag = head.orig.tag + 1;
+            assert(n_head.orig.val >= 1);
             old_head        = atomicCAS((uint64_t *) &free_head.pack, head.pack, n_head.pack);
         } while (head != old_head);
+
+        assert(head.orig.val > 1);
+        assert(head.orig.val < 1024+2);
         return head.orig.val;
     }
 
     __device__ void release_node(int index){
         assert(__popc(__ballot(1)) == 1);
         assert(index > 1);
+        assert(index < 1024+2);
         tagged_uint32_t head = free_head;
         tagged_uint32_t n_head;
         while(true) {
             node[index].next = head.orig.val;
             n_head.orig.tag  = head.orig.tag + 1;
             n_head.orig.val  = index;
+            assert(n_head.orig.val >= 1);
             tagged_uint32_t old_head = atomicCAS((uint64_t *) &free_head.pack, head.pack, n_head.pack);
             if (old_head == head) break;
             head = old_head;

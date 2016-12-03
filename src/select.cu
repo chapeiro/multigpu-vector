@@ -5,6 +5,7 @@
 #include <cstring>
 #include "select.cuh"
 #include "common.cuh"
+#include "buffer_manager.cuh"
 
 using namespace std;
 
@@ -24,7 +25,6 @@ __device__ __forceinline__ void push_results(volatile int32_t *src, int32_t *dst
     reinterpret_cast<vec4*>(dst)[elems_old/4 + laneid] = tmp_out;
 }
 
-__managed__ buffer_pool<int32_t> *buffpool;
 
 template<size_t warp_size, typename T>
 __device__ __forceinline__ void unstable_select_gpu_device<warp_size, T>::push_results(volatile int32_t *src, uint32_t* elems) volatile{
@@ -47,7 +47,7 @@ __device__ __forceinline__ void unstable_select_gpu_device<warp_size, T>::push_r
 #ifndef NDEBUG
             bool n_endofbuffers = 
 #endif
-            buffpool->acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
+            buffer_manager<int32_t>::acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
             assert(n_endofbuffers);
 
             if (repl){
@@ -126,7 +126,7 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, unstab
                 filterout                     -= 4*warpSize;
             }
 
-            __syncthreads(); //FIXME: this should not be needed, but racecheck produces errors without it
+            // __syncthreads(); //FIXME: this should not be needed, but racecheck produces errors without it
         }
     }
 
@@ -261,7 +261,7 @@ __device__ void unstable_select_gpu_device<warp_size, T>::unstable_select_flush(
 #ifndef NDEBUG
             bool n_endofbuffers = 
 #endif
-            buffpool->acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
+            buffer_manager<int32_t>::acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
             assert(n_endofbuffers);
 
             if (repl){

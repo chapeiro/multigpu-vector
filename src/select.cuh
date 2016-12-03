@@ -6,6 +6,7 @@
 #include <cassert>
 #include "common.cuh"
 #include "buffer_pool.cuh"
+#include "buffer_manager.cuh"
 
 __global__ void unstable_select(int32_t *src, int32_t *dst, int N, int32_t pred, int32_t *buffer, uint32_t *output_size, uint32_t *buffer_size, uint32_t *finished);
 
@@ -17,10 +18,6 @@ uint32_t unstable_select_gpu_caller(int32_t *src, unstable_select_gpu_device<war
 
 void stable_select_cpu(int32_t *a, int32_t *b, int N);
 
-extern __managed__ buffer_pool<int32_t> * buffpool;//(1024, 0);
-
-
-
 template<size_t warp_size = WARPSIZE, typename T = int32_t>
 class unstable_select_gpu_device{
 public:
@@ -31,22 +28,17 @@ public:
     __host__ unstable_select_gpu_device(buffer_pool<int32_t> *outpool, int dev=0): outpool(outpool){
         set_device_on_scope d(dev);
 
-    buffer_pool<int32_t>::buffer_t ** buff;
-    buffer_pool<int32_t>::buffer_t ** buff_ret;
-    gpu(cudaMalloc(&buff, sizeof(buffer_pool<int32_t>::buffer_t *)));
-    cudaMallocHost(&buff_ret, sizeof(buffer_pool<int32_t>::buffer_t *));
-    cudaStream_t strm;
-    cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
-        // output_buffer = NULL;// buffpool->acquire_buffer_blocked();
-        // printf("%lld\n", buffpool);
-        output_buffer = buffpool->h_acquire_buffer_blocked(buff, buff_ret, strm);
+        buffer_pool<int32_t>::buffer_t ** buff;
+        gpu(cudaMallocHost(&buff, sizeof(buffer_pool<int32_t>::buffer_t *)));
+        cudaStream_t strm;
+        cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
 
+        buffer_manager<int32_t>::h_get_buffer(buff, strm, dev);
 
-    cudaStreamDestroy(strm);
-    cudaFree(buff);
-    cudaFreeHost(buff_ret);
-        // output_buffer = cuda_new<buffer_pool<int32_t>::buffer_t>(dev);
-        printf("->%llx\n", output_buffer);
+        cudaStreamSynchronize(strm);
+        output_buffer = *buff;
+        cudaStreamDestroy(strm);
+        cudaFreeHost(buff);
     }
 
     __device__ __forceinline__ void push_results(volatile int32_t *src, uint32_t* elems) volatile;

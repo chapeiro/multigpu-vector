@@ -22,11 +22,14 @@ private:
     T      *data;
     
     friend inspector_t;
-
-    __host__ buffer(int t, int b){}
+    __host__ buffer(){}
 
 public:
-    __host__ buffer(int device): cnt(0){
+    int     device;
+
+public:
+
+    __host__ buffer(int device): cnt(0), device(device){
         set_device_on_scope d(device);
         gpu(cudaMalloc(&data, size * sizeof(T)));
     }
@@ -136,7 +139,7 @@ private:
     cudaStream_t strm;
 
 public:
-    buffer_inspector(cudaStream_t strm): buff(5, 6), strm(strm){}
+    buffer_inspector(cudaStream_t strm): strm(strm){}
 
     __host__ void load(buffer_t *d_buff, bool blocking = true){
         gpu(cudaMemcpyAsync(&buff, d_buff, sizeof(buffer_t), cudaMemcpyDefault, strm));

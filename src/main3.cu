@@ -9,7 +9,9 @@
 #include "common.cuh"
 #include "select.cuh"
 #include <iomanip>
+#include "buffer_manager.cuh"
 #include <cuda_profiler_api.h>
+#include <chrono>
 // #include <functional>
 
 using namespace std;
@@ -19,6 +21,8 @@ using namespace std;
 #endif
 
 constexpr int N = NVAL;
+
+
 
 vector<pair<int32_t *, uint32_t>> data_pool;
 
@@ -33,7 +37,6 @@ mutex data_pool_mutex2;
 
 condition_variable cv2;
 unsigned int remaining_sources2 = 0;
-
 
 mutex data_pool_mutex_cons_ready;
 
@@ -103,7 +106,7 @@ __host__ void generator2(buffer_pool<int32_t> *src, int device = 0){
         buffer_pool<int32_t>::buffer_t * buff = src->h_acquire_buffer_blocked(buff_d, buff_ret, strm);
         cout << "]]]]]]" << buff << endl;
         if (buff == (buffer_pool<int32_t>::buffer_t *) 1) {
-            this_thread::sleep_for(chrono::milliseconds(1));
+            // this_thread::sleep_for(chrono::microseconds(100));
             continue;
         }
         if (!src->is_valid(buff)) break;
@@ -126,7 +129,7 @@ __host__ void consume2(int32_t *dst, uint32_t *res, int device = 0){
     set_device_on_scope d(device);
     cudaStream_t strm2;
     cudaStreamCreateWithFlags(&strm2, cudaStreamNonBlocking);
-    buffpool->register_producer(NULL);
+    // buffpool->register_producer(NULL);
     buffer_pool<int32_t>::buffer_t::inspector_t insp(strm2);
     do {
         unique_lock<mutex> lock(data_pool_mutex2);
@@ -155,11 +158,11 @@ __host__ void consume2(int32_t *dst, uint32_t *res, int device = 0){
         gpu(cudaMemcpyAsync(dst+start, data, sizeof(int32_t)*cnt, cudaMemcpyDefault, strm2));
         cout << "---------------------------------------------------------------consumed: " << dec << (uint64_t) *res << endl;
 
-        buffpool->h_release_buffer(p, strm2);
+        buffer_manager<int32_t>::release_buffer(p, strm2);
+        // buffpool->h_release_buffer(p, strm2);
     } while (true);
     gpu(cudaStreamSynchronize(strm2));
-    buffpool->unregister_producer(NULL);
-    // *res = filter->next(dst);
+    // buffpool->unregister_producer(NULL);
     cudaStreamDestroy(strm2);
 }
 
@@ -175,15 +178,23 @@ void generate_data(int32_t *src, uint32_t N, uint32_t buff_size){
     cv.notify_all();
 }
 
-__host__ uint32_t unstable_select_gpu_caller2(int32_t *src, int32_t *dst, uint32_t N, int32_t pred, const dim3 &dimGrid, const dim3 &dimBlock, cudaEvent_t &start, cudaEvent_t &stop){
+__host__ uint32_t unstable_select_gpu_caller2(int32_t *src, int32_t *dst, uint32_t N, int32_t pred, const dim3 &dimGrid, const dim3 &dimBlock, chrono::microseconds &dur){
     data_pool.clear();
 
+    set_device_on_scope d(1);
+
     remaining_sources = 1;
-    remaining_sources2 = 1;
+    remaining_sources2 = 2;
 
     cudaStream_t sta, stb;//, stc, std;
-    cudaStreamCreateWithFlags(&sta, cudaStreamNonBlocking);
-    cudaStreamCreateWithFlags(&stb, cudaStreamNonBlocking);
+    {
+        set_device_on_scope d(0);
+        cudaStreamCreateWithFlags(&sta, cudaStreamNonBlocking);
+    }
+    {
+        set_device_on_scope d(1);
+        cudaStreamCreateWithFlags(&stb, cudaStreamNonBlocking);
+    }
     // cudaStreamCreateWithFlags(&stc, cudaStreamNonBlocking);
     // cudaStreamCreateWithFlags(&std, cudaStreamNonBlocking);
 
@@ -191,36 +202,44 @@ __host__ uint32_t unstable_select_gpu_caller2(int32_t *src, int32_t *dst, uint32
 
     thread g(generate_data, src, N, DEFAULT_BUFF_CAP);//WARPSIZE*64);
 
-    buffer_pool<int32_t> *outpool = cuda_new<buffer_pool<int32_t>>(0, 1024, 0, 0);
+    buffer_pool<int32_t> *outpool0 = cuda_new<buffer_pool<int32_t>>(0, 1024, 0, 0);
+    buffer_pool<int32_t> *outpool1 = cuda_new<buffer_pool<int32_t>>(1, 1024, 0, 1);
 
-    unstable_select_gpu<> filter1(dimGrid, dimBlock, outpool, sta);
-    unstable_select_gpu<> filter2(dimGrid, dimBlock, outpool, stb);
+    unstable_select_gpu<> filter1(dimGrid, dimBlock, outpool0, sta, 0);
+    unstable_select_gpu<> filter2(dimGrid, dimBlock, outpool1, stb, 1);
     // unstable_select_gpu<> filter3(dimGrid, dimBlock, outpool, stc);
     // unstable_select_gpu<> filter4(dimGrid, dimBlock, outpool, stc);
 
     gpu(cudaDeviceSynchronize());
 
     cudaProfilerStart();
-    cudaEventRecord(start, 0);
+    // cudaEventRecord(start, 0);
 
-    thread t1(consume, &filter1, outpool);
-    thread t2(consume, &filter2, outpool);
+    chrono::system_clock::time_point start = chrono::system_clock::now();
+
+    thread t1(consume, &filter1, outpool0);
+    thread t2(consume, &filter2, outpool1);
     // thread t2b(consume, &filter3, outpool);
     // thread t2c(consume, &filter4, outpool);
-    thread t3(generator2, outpool, 0);
-    thread t4(consume2, dst, &res1, 0);
+    thread t30(generator2, outpool0, 0);
+    thread t31(generator2, outpool1, 1);
+    thread t4(consume2, dst, &res1, 1);
     t1.join();
     t2.join();
     // t2b.join();
     // t2c.join();
-    t3.join();
+    t30.join();
+    t31.join();
     t4.join();
     g.join();
 
-    cudaEventRecord(stop, 0);
+    chrono::system_clock::time_point end = chrono::system_clock::now();
+    dur = chrono::duration_cast<chrono::microseconds>(end - start);
+    // cudaEventRecord(stop, 0);
     cudaProfilerStop();
 
-    cuda_delete(outpool);
+    cuda_delete(outpool0);
+    cuda_delete(outpool1);
     
     return res1;
 }
@@ -232,10 +251,8 @@ int main(){
     setbuf(stdout, NULL);
     // gpu(cudaSetDeviceFlags(cudaDeviceScheduleYield));
     srand(time(0));
+    buffer_manager<int32_t>::init();
 
-    buffpool = cuda_new<buffer_pool<int32_t>>(0, 1024, 1024, 0);
-    gpu(cudaMemAdvise(&buffpool, sizeof(buffer_pool<int32_t> *), cudaMemAdviseSetReadMostly, 0));
-    gpu(cudaDeviceSynchronize());
     cout << "asdasf " << endl;
     
     a = (int32_t*) malloc(N*sizeof(int32_t));
@@ -278,8 +295,11 @@ int main(){
     cudaEvent_t start, stop, start1, stop1, start2, stop2;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    cudaEventCreate(&start1);
-    cudaEventCreate(&stop1);
+    {
+        set_device_on_scope d(1);
+        cudaEventCreate(&start1);
+        cudaEventCreate(&stop1);
+    }
     cudaEventCreate(&start2);
     cudaEventCreate(&stop2);
     dim3 dimBlock(1024, 1 );
@@ -291,7 +311,8 @@ int main(){
     memcpy(a_pinned, a, N*sizeof(int32_t));
 
 #ifndef NTESTUVA
-    int results1 = unstable_select_gpu_caller2(a_pinned, b_pinned, N, 50, dimGrid, dimBlock, start1, stop1);
+    chrono::microseconds dur;
+    int results1 = unstable_select_gpu_caller2(a_pinned, b_pinned, N, 50, dimGrid, dimBlock, dur);
 #else
     int results1 = 0;
 #endif
@@ -348,13 +369,14 @@ int main(){
         // assert(b_pinned[i] > 0);
     }
 #endif
+#endif
     cout << results << " " << results1 << " " << results2 << " " << a_pinned[4] << endl;
 
     float milliseconds1 = 0;
     cudaEventElapsedTime(&milliseconds1, start, stop);
     cout << milliseconds1 << endl;
-    float milliseconds2 = 0;
-    cudaEventElapsedTime(&milliseconds2, start1, stop1);
+    float milliseconds2 = dur.count()/1000.0;
+    // cudaEventElapsedTime(&milliseconds2, start1, stop1);
     cout << milliseconds2 << endl;
     float milliseconds3 = 0;
     cudaEventElapsedTime(&milliseconds3, start2, stop2);
@@ -364,11 +386,13 @@ int main(){
     cout << millis/milliseconds1 << endl;
     cout << millis/milliseconds2 << endl;
     cout << millis/milliseconds3 << endl;
-    return 0;
+#ifndef NDEBUG
     // assert(results1 == results2);
     if (results != results1){
         cout << "Wrong results!!!!!!" << endl;
     } else {
+        cout << "Skipping checking results..." << endl;
+        return 0;
 #ifndef __CUDA_ARCH__
         sort(b_pinned, b_pinned + results1);
         sort(b       , b        + results);
