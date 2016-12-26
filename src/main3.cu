@@ -94,16 +94,14 @@ __host__ void generator2(buffer_pool<int32_t> *src, int device = 0){
     }
     // --remaining_sources2;return;
     set_device_on_scope d(device);
-    buffer_pool<int32_t>::buffer_t ** buff_d;
     buffer_pool<int32_t>::buffer_t ** buff_ret;
-    gpu(cudaMalloc(&buff_d, sizeof(buffer_pool<int32_t>::buffer_t *)));
     cudaMallocHost(&buff_ret, sizeof(buffer_pool<int32_t>::buffer_t *));
     cudaStream_t strm;
     cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
 
     do {
         cout << "poll " << endl;
-        buffer_pool<int32_t>::buffer_t * buff = src->h_acquire_buffer_blocked(buff_d, buff_ret, strm);
+        buffer_pool<int32_t>::buffer_t * buff = src->h_acquire_buffer_blocked(buff_ret, strm);
         cout << "]]]]]]" << buff << endl;
         if (buff == (buffer_pool<int32_t>::buffer_t *) 1) {
             // this_thread::sleep_for(chrono::microseconds(100));
@@ -120,7 +118,6 @@ __host__ void generator2(buffer_pool<int32_t> *src, int device = 0){
     cv2.notify_all();
 
     cudaStreamDestroy(strm);
-    cudaFree(buff_d);
     cudaFreeHost(buff_ret);
 }
 

@@ -1,5 +1,5 @@
-#ifndef OPTIMISTIC_SAFE_DEVICE_STACK_CUH_
-#define OPTIMISTIC_SAFE_DEVICE_STACK_CUH_
+#ifndef LOCKFREE_STACK_CUH_
+#define LOCKFREE_STACK_CUH_
 
 #include "common.cuh"
 #include <cstdint>
@@ -56,12 +56,12 @@ private:
             return pack == t.pack;
         }
 
-        __device__ __host__ tagged_uint32_t operator=(uint64_t t){
+        __device__ __host__ tagged_uint32_t& operator=(uint64_t t){
             pack = t;
             return *this;
         }
 
-        __device__ __host__ tagged_uint32_t operator=(volatile tagged_uint32_t &t){
+        __device__ __host__ tagged_uint32_t& operator=(volatile tagged_uint32_t &t){
             pack = t.pack;
             return *this;
         }
@@ -207,4 +207,4 @@ public:
     }
 };
 
-#endif /* OPTIMISTIC_SAFE_DEVICE_STACK_CUH_ */
+#endif /* LOCKFREE_STACK_CUH_ */

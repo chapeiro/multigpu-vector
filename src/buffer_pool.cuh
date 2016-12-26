@@ -55,6 +55,7 @@ public:
     __host__ ~buffer_pool(){
         // assert(pool->full());
         // while (!pool->empty()) cuda_delete(pool->pop_blocked());
+        printf("asdasdasf\n");
         cuda_delete(pool);
     }
 
@@ -90,12 +91,12 @@ public:
                 return tmp;
             } else if (!producers && !available_buffers) return pool_t::get_invalid();
         }
-        printf("--------------------------------_>timeout%d %d %d\n", cnt, producers, available_buffers);
+        // printf("--------------------------------_>timeout%d %d %d\n", cnt, producers, available_buffers);
         return (buffer_t *) 1;
     }
 
 
-    __host__ inline buffer_t* h_acquire_buffer_blocked(buffer_t ** buff, buffer_t ** buff_ret, cudaStream_t strm){
+    __host__ inline buffer_t* h_acquire_buffer_blocked(buffer_t ** buff_ret, cudaStream_t strm){
         
         acquire_buffer_blocked_unsafe_for_host<<<1, 1, 0, strm>>>(this, buff_ret);
         
@@ -152,8 +153,8 @@ public:
     __host__ __device__ inline void unregister_producer(void * producer){
 #ifdef __CUDA_ARCH__
         assert(producers);
-        printf("------------------------------------------------------------++\n");
-        atomicSub((uint32_t *) &producers, 1);
+        uint32_t old_prod = atomicSub((uint32_t *) &producers, 1);
+        printf("------------------------------------------------------------++%d\n", old_prod - 1);
 #else
         cudaPointerAttributes attrs;
         gpu(cudaPointerGetAttributes(&attrs, this));

@@ -4,15 +4,18 @@
 #include "buffer.cuh"
 #include "lockfree_stack.cuh"
 #include <type_traits>
+#include "threadsafe_stack.cuh"
 
 extern __device__ __constant__ lockfree_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> * pool;
 extern __device__ __constant__ int deviceId;
+
+extern threadsafe_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> * h_pool;
 
 template<typename T>
 class buffer_manager;
 
 __global__ void release_buffer_host(buffer<int32_t, DEFAULT_BUFF_CAP> *buff);
-__global__ void get_buffer_host    (buffer<int32_t, DEFAULT_BUFF_CAP> **buff);
+__global__ void get_buffer_host    (buffer<int32_t, DEFAULT_BUFF_CAP> **buff, int buffs = 1);
 
 template<typename T = int32_t>
 class buffer_manager{
@@ -20,12 +23,26 @@ class buffer_manager{
 public:
     typedef buffer<int32_t, DEFAULT_BUFF_CAP, vec4> buffer_t;
     typedef lockfree_stack<buffer_t *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL>        pool_t;
+    typedef threadsafe_stack<buffer_t *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL>      h_pool_t;
 
     static __host__ void init(int size = 1024){
         int devices;
         gpu(cudaGetDeviceCount(&devices));
         for (int j = 0; j < devices; ++j) {
             set_device_on_scope d(j);
+
+            for (int i = 0 ; i < devices ; ++i) {
+                if (i != j) {
+                    int t;
+                    cudaDeviceCanAccessPeer(&t, j, i);
+                    if (t){
+                        cudaDeviceEnablePeerAccess(i, 0);
+                    } else {
+                        cout << "Warning: P2P disabled for : " << j << "->" << i << endl;
+                    }
+                }
+            }
+
 
             vector<buffer_t *> buffs;
             for (size_t i = 0 ; i < size ; ++i) buffs.push_back(cuda_new<buffer_t>(j, j));
@@ -34,36 +51,68 @@ public:
             gpu(cudaMemcpyToSymbol(pool    , &tmp, sizeof(pool_t *)));
             gpu(cudaMemcpyToSymbol(deviceId,   &j, sizeof(int     )));
         }
+        vector<buffer_t *> buffs;
+        for (size_t i = 0 ; i < size ; ++i) buffs.push_back(cuda_new<buffer_t>(-1, -1));
+        h_pool = new h_pool_t(size, buffs);
     }
 
-    static __device__ buffer_t * get_buffer(){
+    static __host__ __device__ buffer_t * get_buffer(){
+#ifdef __CUDA_ARCH__
         return pool->pop();
+#else
+        return h_pool->pop();
+#endif
     }
 
     static __device__ bool try_get_buffer(buffer_t **ret){
+#ifdef __CUDA_ARCH__
         if (pool->try_pop(ret)){
+#else
+        if (h_pool->try_pop(ret)){
+#endif
             (*ret)->clean();
             return true;
         }
         return false;
     }
 
-    static __host__ inline void h_get_buffer(buffer_t **buff, cudaStream_t strm, int dev){
+    static __host__ inline void h_get_buffer(buffer_t **buff, cudaStream_t strm, int dev, int buffs = 1){
         set_device_on_scope d(dev);
-        get_buffer_host<<<1, 1, 0, strm>>>(buff);
+        get_buffer_host<<<1, 1, 0, strm>>>(buff, buffs);
         cudaStreamSynchronize(strm);
     }
 
-    static __host__ __device__ void release_buffer(buffer_t * buff, cudaStream_t strm = 0){
+    static __host__ __device__ void release_buffer(buffer_t * buff, cudaStream_t strm){
 #ifdef __CUDA_ARCH__
         assert(strm == 0); //FIXME: something better ?
         if (buff->device == deviceId) pool->push(buff);
-        else                          assert(false); //FIXME: IMPORTANT free buffer of another device!
+        else                          assert(false); //FIXME: IMPORTANT free buffer of another device (or host)!
 #else
-        cudaPointerAttributes attrs;
-        cudaPointerGetAttributes(&attrs, buff);
-        set_device_on_scope d(attrs.device);
-        release_buffer_host<<<1, 1, 0, strm>>>(buff);
+        int dev = get_device(buff);
+        if (dev >= 0){
+            set_device_on_scope d(dev);
+            release_buffer_host<<<1, 1, 0, strm>>>(buff);
+            gpu(cudaPeekAtLastError()  );
+            gpu(cudaDeviceSynchronize());
+        } else {
+            h_pool->push(buff);
+        }
+#endif
+    }
+
+    static __host__ __device__ void release_buffer(buffer_t * buff){
+#ifdef __CUDA_ARCH__
+        release_buffer(buff, 0);
+#else
+        cudaStream_t strm = 0;
+        int dev = get_device(buff);
+        if (dev >= 0){
+            set_device_on_scope d(dev);
+
+            gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
+        }
+        release_buffer(buff, strm);
+        if (dev >= 0) gpu(cudaStreamDestroy(strm));
 #endif
     }
 

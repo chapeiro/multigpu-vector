@@ -130,27 +130,81 @@ __device__ T atomicSub(T *address, T val){
 
 template<typename T, typename... Args>
 __host__ T * cuda_new(int dev, Args... args){
-    set_device_on_scope d(dev);
-    T *tmp = new T(args...);
-    T *res;
-    gpu(cudaMalloc((void**) &res, sizeof(T)));
-    gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
-    free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
-                //      trigger initialization but we want to free the 
-                //      corresponding memory after moving to device 
-                //      without triggering the destructor
-    gpu(cudaDeviceSynchronize());
-    return res;
+    if (dev >= 0){
+        set_device_on_scope d(dev);
+        T *tmp = new T(args...);
+        T *res;
+        gpu(cudaMalloc((void**) &res, sizeof(T)));
+        gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
+        free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
+                    //      trigger initialization but we want to free the 
+                    //      corresponding memory after moving to device 
+                    //      without triggering the destructor
+        gpu(cudaDeviceSynchronize());
+        return res;
+    } else {
+        T *tmp = new T(args...);
+        T *res;
+        gpu(cudaMallocHost((void**) &res, sizeof(T)));
+        gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
+        free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
+                    //      trigger initialization but we want to free the 
+                    //      corresponding memory after moving to device 
+                    //      without triggering the destructor
+        gpu(cudaDeviceSynchronize());
+        return res;
+        // return new T(args...);
+    }
 }
 
 
 template<typename T, typename... Args>
 __host__ void cuda_delete(T *obj, Args... args){
-    T *tmp = (T *) malloc(sizeof(T));
-    gpu(cudaDeviceSynchronize());
-    gpu(cudaMemcpy(tmp, obj, sizeof(T), cudaMemcpyDefault));
-    gpu(cudaFree(obj));
-    delete tmp;
+    int device = get_device(obj);
+    if (device >= 0){
+        T *tmp = (T *) malloc(sizeof(T));
+        gpu(cudaDeviceSynchronize());
+        gpu(cudaMemcpy(tmp, obj, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaFree(obj));
+        delete tmp;
+    } else {
+        T *tmp = (T *) malloc(sizeof(T));
+        gpu(cudaDeviceSynchronize());
+        gpu(cudaMemcpy(tmp, obj, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaFreeHost(obj));
+        delete tmp;
+        // delete obj;
+    }
+}
+
+__host__ int get_device(void *p);
+
+__device__ __forceinline__ int get_laneid(){
+    uint32_t laneid;
+    asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+    return laneid;
+}
+
+__device__ __forceinline__ int get_warpid(){
+    uint32_t warpid;
+    asm("mov.u32 %0, %%warpid;" : "=r"(warpid));
+    return warpid;
+}
+
+__device__ __host__ int __forceinline__ find_nth_set_bit(uint32_t c1, unsigned int n){
+    int t, i = n, r = 0;
+    uint32_t c2  = c1 - ((c1 >> 1) & 0x55555555);
+    uint32_t c4  = ((c2 >> 2) & 0x33333333) + (c2 & 0x33333333);
+    uint32_t c8  = ((c4 >> 4) + c4) & 0x0f0f0f0f;
+    uint32_t c16 = ((c8 >> 8) + c8);
+    uint32_t c32 = ((c16 >> 16) + c16) & 0x3f;
+    t = (c16    ) & 0x1f; if (i >= t) { r += 16; i -= t; }
+    t = (c8 >> r) & 0x0f; if (i >= t) { r +=  8; i -= t; }
+    t = (c4 >> r) & 0x07; if (i >= t) { r +=  4; i -= t; }
+    t = (c2 >> r) & 0x03; if (i >= t) { r +=  2; i -= t; }
+    t = (c1 >> r) & 0x01; if (i >= t) { r +=  1;         }
+    if (n >= c32) r = -1;
+    return r; 
 }
 
 union vec4{
@@ -170,7 +224,7 @@ __device__ __host__ inline constexpr T round_down(T num, T mult){
 
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
 template<typename T>
-__device__ __forceinline__ T broadcast(T val, uint32_t src){
+__device__ __forceinline__ T brdcst(T val, uint32_t src){
 #ifdef __CUDA_ARCH__
     uint32_t laneid;
     asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
@@ -184,7 +238,7 @@ __device__ __forceinline__ T broadcast(T val, uint32_t src){
 #endif
 }
 #else
-   #define broadcast(v, l) (__shfl(v, l))
+   #define brdcst(v, l) (__shfl(v, l))
 #endif
 
 

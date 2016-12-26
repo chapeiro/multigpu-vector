@@ -3,6 +3,7 @@
 __device__ __constant__ lockfree_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> * pool;
 __device__ __constant__ int deviceId;
 
+threadsafe_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> * h_pool;
 
 
 __global__ void release_buffer_host(buffer<int32_t, DEFAULT_BUFF_CAP> *buff){
@@ -11,8 +12,8 @@ __global__ void release_buffer_host(buffer<int32_t, DEFAULT_BUFF_CAP> *buff){
     buffer_manager<int32_t>::release_buffer(buff);
 }
 
-__global__ void get_buffer_host(buffer<int32_t, DEFAULT_BUFF_CAP> **buff){
+__global__ void get_buffer_host(buffer<int32_t, DEFAULT_BUFF_CAP> **buff, int buffs){
     assert(blockDim.x * blockDim.y * blockDim.z == 1);
     assert( gridDim.x *  gridDim.y *  gridDim.z == 1);
-    *buff = buffer_manager<int32_t>::get_buffer();
+    for (int i = 0 ; i < buffs ; ++i) buff[i] = buffer_manager<int32_t>::get_buffer();
 }

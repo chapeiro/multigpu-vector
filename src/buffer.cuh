@@ -4,6 +4,8 @@
 #include "common.cuh"
 #include <vector>
 
+#include <iostream>
+
 using namespace std;
 
 
@@ -17,7 +19,7 @@ class buffer {
 public:
     typedef buffer_inspector<T, size, T4> inspector_t;
 
-private:
+public://FIXME: private:
     uint32_t cnt; //in wrapSize * T
     T      *data;
     
@@ -30,12 +32,20 @@ public:
 public:
 
     __host__ buffer(int device): cnt(0), device(device){
-        set_device_on_scope d(device);
-        gpu(cudaMalloc(&data, size * sizeof(T)));
+        if (device >= 0){
+            set_device_on_scope d(device);
+            gpu(cudaMalloc(&data, size * sizeof(T)));
+        } else {
+            gpu(cudaMallocHost(&data, size * sizeof(T)));
+        }
     }
 
     __host__ ~buffer(){
-        cudaFree(data);
+        if (device >= 0){
+            cudaFree(data);
+        } else {
+            cudaHostFree(data);
+        }
     }
 
     __host__ __device__ uint32_t count() const{
@@ -65,7 +75,7 @@ public:
     __host__ __device__ static constexpr uint32_t capacity(){
         return size;
     }
-    __device__ void clean(){
+    __host__ __device__ void clean(){
         cnt = 0;
     }
 
@@ -82,7 +92,7 @@ public:
         asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
         uint32_t old_cnt;
         if (laneid == 0) old_cnt = atomicAdd((uint32_t *) &cnt, 4*warpSize);
-        old_cnt = broadcast(old_cnt, 0);
+        old_cnt = brdcst(old_cnt, 0);
 
         if (old_cnt > size - 4*warpSize) return false;
         reinterpret_cast<T4 *>(data + old_cnt)[laneid] = x; //FIXME: someone may have not completed writing out everything when the buffer gets released!
@@ -135,23 +145,52 @@ public:
     typedef buffer<T, size, T4> buffer_t;
 
 private:
-    buffer_t     buff;
+    buffer_t    *buff;
     cudaStream_t strm;
 
 public:
-    buffer_inspector(cudaStream_t strm): strm(strm){}
+    buffer_inspector(cudaStream_t strm): strm(strm){
+        buff = (buffer_t *) malloc(sizeof(buffer_t));
+    }
+    
+    ~buffer_inspector(){
+        free(buff);
+    }
 
     __host__ void load(buffer_t *d_buff, bool blocking = true){
-        gpu(cudaMemcpyAsync(&buff, d_buff, sizeof(buffer_t), cudaMemcpyDefault, strm));
+        gpu(cudaMemcpyAsync(buff, d_buff, sizeof(buffer_t), cudaMemcpyDefault, strm));
         if (blocking) gpu(cudaStreamSynchronize(strm));
     }
 
     __host__ uint32_t count(){
-        return min(buff.cnt, size);
+        return min(buff->cnt, size);
     }
 
     __host__ const T * data(){
-        return buff.data;
+        return buff->data;
+    }
+
+    __host__ static constexpr uint32_t capacity(){
+        return buffer_t::capacity();
+    }
+
+    __host__ void overwrite(const T * src, uint32_t N, bool blocking = true){
+        assert(N <= size);
+
+        gpu(cudaMemcpyAsync(buff->data, src, N*sizeof(T), cudaMemcpyDefault, strm));
+        if (blocking) gpu(cudaStreamSynchronize(strm));
+        buff->cnt = N;
+    }
+
+    __host__ void read(T * dst, uint32_t N, bool blocking = true){
+        assert(N <= buff->cnt);
+        gpu(cudaMemcpyAsync(dst, buff->data, N*sizeof(T), cudaMemcpyDefault, strm));
+        if (blocking) gpu(cudaStreamSynchronize(strm));
+    }
+
+    __host__ void save(buffer_t *d_buff, bool blocking = true){
+        gpu(cudaMemcpyAsync(d_buff, buff, sizeof(buffer_t), cudaMemcpyDefault, strm));
+        if (blocking) gpu(cudaStreamSynchronize(strm));
     }
 };
 
