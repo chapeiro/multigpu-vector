@@ -168,7 +168,7 @@ __host__ __device__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
         
 
         //move buffer
-        buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(strm2, device);
+        buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(device);
 
         buffer_pool_t::buffer_t::inspector_t from(strm2);
         buffer_pool_t::buffer_t::inspector_t to  (strm2);
@@ -246,7 +246,8 @@ __host__ void exchange::join(){
 __host__ __device__ void producer::join(){
     if (outpool) {
 #ifdef __CUDA_ARCH__
-        if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0){
+        if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&
+                blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0){
             printf("%d %d %d\n", threadIdx.x, threadIdx.y, threadIdx.z);
             printf("%d %d %d\n",  blockIdx.x,  blockIdx.y,  blockIdx.z);
             outpool->unregister_producer(this);

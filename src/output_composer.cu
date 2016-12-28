@@ -8,13 +8,13 @@ output_composer<warp_size, T>::output_composer(Operator * parent, int dev): pare
 
     // buffer_pool<int32_t>::buffer_t ** buff;
     // gpu(cudaMallocHost(&buff, sizeof(buffer_pool<int32_t>::buffer_t *)));
-    cudaStream_t strm;
-    cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
+    // cudaStream_t strm;
+    // cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
 
-    output_buffer = buffer_manager<int32_t>::h_get_buffer(strm, dev);
+    output_buffer = buffer_manager<int32_t>::h_get_buffer(dev);
 
-    cudaStreamSynchronize(strm);
-    cudaStreamDestroy(strm);
+    // cudaStreamSynchronize(strm);
+    // cudaStreamDestroy(strm);
     // cudaFreeHost(buff);
 }
 

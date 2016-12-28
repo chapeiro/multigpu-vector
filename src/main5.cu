@@ -73,7 +73,7 @@ int main(){
 
     Operator * oprod2 = cuda_new<Operator>(1, exc2->prods[0]);
 
-    dim3 gridsel(1);
+    dim3 gridsel(8);
 
     unstable_select<> *s = cuda_new<unstable_select<>>(1, oprod2, gridsel.x*gridsel.y*gridsel.z, 1);
     Operator * oprod3 = cuda_new<Operator>(1, s);

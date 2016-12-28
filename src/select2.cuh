@@ -12,7 +12,7 @@ class unstable_select{
 private:
     static_assert(sizeof(T)*8 == 32, "Operator is only implemented for data types of 32-bits size");
     Operator                      * parent;
-    output_composer<warp_size, T> * output;
+    output_composer<warp_size, T>   output;
     volatile uint32_t               buffer_size;
     uint32_t                        finished;
     T                             * buffer;

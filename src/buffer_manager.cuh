@@ -107,7 +107,7 @@ public:
         return false;
     }
 
-    static __host__ inline buffer_t * h_get_buffer(cudaStream_t strm, int dev){
+    static __host__ inline buffer_t * h_get_buffer(int dev){
         unique_lock<std::mutex> lock(devive_buffs_mutex[dev]);
         if (device_buffs_pool[dev].empty()){
             set_device_on_scope d(dev);

@@ -4,8 +4,9 @@
 using namespace std;
 
 template<size_t warp_size, typename T>
-unstable_select<warp_size, T>::unstable_select(Operator * parent, int grid_size, int dev): parent(parent), buffer_size(0), finished(0){
-    output = cuda_new<output_composer<warp_size, T>>(dev, parent, dev);
+unstable_select<warp_size, T>::unstable_select(Operator * parent, int grid_size, int dev): 
+        parent(parent), output(parent, dev), buffer_size(0), finished(0){
+    // output = cuda_new<output_composer<warp_size, T>>(dev, parent, dev);
 
     assert(dev >= 0);
     set_device_on_scope d(dev);
@@ -63,7 +64,7 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_warp(const vec4 
         filterout += newpop;
 
         if (filterout >= 4*warpSize){
-            output->push(wrapoutput);
+            output.push(wrapoutput);
 
             wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
             filterout                     -= 4*warpSize;
@@ -118,7 +119,7 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_close(){
                 filterout += delta;
 
                 if (filterout >= 4*warpSize){
-                    output->push(wrapoutput);
+                    output.push(wrapoutput);
                     wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                     filterout                     -= 4*warpSize;
                 }
@@ -168,12 +169,12 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_close(){
 
         if (totcnt0 >= 4*warpSize){
             assert(totcnt0 <= 4*warpSize);
-            output->push(buffer+bnum0*(4*warpSize));
+            output.push(buffer+bnum0*(4*warpSize));
             if (laneid == 0) cnts[bnum0] = 0; //clean up for next round
         }
         if (totcnt1 >= 4*warpSize){
             assert(totcnt1 <= 4*warpSize);
-            output->push(buffer+bnum1*(4*warpSize));
+            output.push(buffer+bnum1*(4*warpSize));
             if (laneid == 0) cnts[bnum1] = 0; //clean up for next round
         }
     }
@@ -206,7 +207,7 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_close(){
 }
 
 template<size_t warp_size, typename T>
-__host__ __device__ void unstable_select<warp_size, T>::consume2(buffer_pool<int32_t>::buffer_t * data){
+__host__ __device__ void unstable_select<warp_size, T>::consume(buffer_pool<int32_t>::buffer_t * data){
 #ifndef __CUDA_ARCH__
     assert(false);
 #else
@@ -235,7 +236,7 @@ __host__ __device__ void unstable_select<warp_size, T>::consume2(buffer_pool<int
 #endif
 }
 template<size_t warp_size, typename T>
-__host__ __device__ void unstable_select<warp_size, T>::consume(buffer_pool<int32_t>::buffer_t * data){
+__host__ __device__ void unstable_select<warp_size, T>::consume2(buffer_pool<int32_t>::buffer_t * data){
 #ifndef __CUDA_ARCH__
     assert(false);
 #else
@@ -299,7 +300,7 @@ __host__ __device__ void unstable_select<warp_size, T>::consume(buffer_pool<int3
             filterout += newpop;
 
             if (filterout >= 4*warpSize){
-                output->push(wrapoutput);
+                output.push(wrapoutput);
 
                 wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                 filterout                     -= 4*warpSize;
@@ -334,7 +335,7 @@ __host__ __device__ void unstable_select<warp_size, T>::consume(buffer_pool<int3
                 filterout += delta;
 
                 if (filterout >= 4*warpSize){
-                    output->push(wrapoutput);
+                    output.push(wrapoutput);
                     wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
                     filterout                     -= 4*warpSize;
                 }
@@ -384,12 +385,12 @@ __host__ __device__ void unstable_select<warp_size, T>::consume(buffer_pool<int3
 
         if (totcnt0 >= 4*warpSize){
             assert(totcnt0 <= 4*warpSize);
-            output->push(buffer+bnum0*(4*warpSize));
+            output.push(buffer+bnum0*(4*warpSize));
             if (laneid == 0) cnts[bnum0] = 0; //clean up for next round
         }
         if (totcnt1 >= 4*warpSize){
             assert(totcnt1 <= 4*warpSize);
-            output->push(buffer+bnum1*(4*warpSize));
+            output.push(buffer+bnum1*(4*warpSize));
             if (laneid == 0) cnts[bnum1] = 0; //clean up for next round
         }
     }
@@ -423,7 +424,7 @@ __host__ __device__ void unstable_select<warp_size, T>::consume(buffer_pool<int3
 
 template<size_t warp_size, typename T>
 __host__ __device__ void unstable_select<warp_size, T>::join(){
-    output->push_flush(buffer, buffer_size);
+    output.push_flush(buffer, buffer_size);
 
     parent->close();
 }

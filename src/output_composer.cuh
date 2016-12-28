@@ -18,7 +18,7 @@ public:
     __host__ __device__ void push(volatile T *x);
     __host__ __device__ void push_flush(T *buffer, uint32_t buffer_size);
     
-    ~output_composer();
+    // ~output_composer();
 };
 
 #endif /* OUTPUT_COMPOSER_CUH */
