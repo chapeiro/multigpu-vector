@@ -12,6 +12,8 @@ class exchange;
 class producer;
 template<size_t warp_size, typename T>
 class unstable_select;
+template<size_t warp_size, size_t size, typename T>
+class gpu_to_cpu_dev;
 
 typedef buffer_pool<int32_t> buffer_pool_t;
 
@@ -27,7 +29,7 @@ typedef buffer_pool_t::buffer_t buffer_t;
 
 class Operator{
 private:
-    typedef variant::variant<generator *, materializer *, producer *, unstable_select<32, int32_t> *> op_t;
+    typedef variant::variant<generator *, materializer *, producer *, unstable_select<32, int32_t> *, gpu_to_cpu_dev<32, 64, buffer_t *> *> op_t;
     op_t op;
 
 public:

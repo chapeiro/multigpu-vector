@@ -16,6 +16,8 @@
 #include "exchange.cuh"
 #include "materializer.cuh"
 #include "generators.cuh"
+
+#include "gpu_to_cpu.cuh"
 // #include <functional>
 
 #include "select2.cuh"
@@ -54,8 +56,32 @@ int main(){
     materializer *mat = new materializer(NULL, dst);//, cout);
     Operator * omat = new Operator(mat);
     
-    vector<int>         prod_loc2        = {1};
-    vector<int>         prodout_loc2     = {1};
+    // vector<int>         prod_loc2        = {1};
+    // vector<int>         prodout_loc2     = {1};
+    // vector<int>         prodout_size2    = {1024};
+    // vector<int>         prod2out2        = {0};
+    // vector<Operator *>  parents2         = {omat};
+    // vector<dim3>        parent_dimGrid2  = {dim3(1)};
+    // vector<dim3>        parent_dimBlock2 = {dim3(1)};
+
+    // exchange *exc2 = new exchange(prod_loc2, 
+    //                                 prodout_loc2, 
+    //                                 prodout_size2,
+    //                                 prod2out2,
+    //                                 parents2,
+    //                                 parent_dimGrid2,
+    //                                 parent_dimBlock2,
+    //                                 {0});
+
+    // Operator * oprod2 = cuda_new<Operator>(1, exc2->prods[0]);
+
+    // dim3 gridsel(8);
+
+    // unstable_select<> *s = cuda_new<unstable_select<>>(1, oprod2, gridsel.x*gridsel.y*gridsel.z, 1);
+    // Operator * oprod3 = cuda_new<Operator>(1, s);
+
+    vector<int>         prod_loc2        = {-1};
+    vector<int>         prodout_loc2     = {-1};
     vector<int>         prodout_size2    = {1024};
     vector<int>         prod2out2        = {0};
     vector<Operator *>  parents2         = {omat};
@@ -71,11 +97,15 @@ int main(){
                                     parent_dimBlock2,
                                     {0});
 
-    Operator * oprod2 = cuda_new<Operator>(1, exc2->prods[0]);
-
     dim3 gridsel(8);
 
-    unstable_select<> *s = cuda_new<unstable_select<>>(1, oprod2, gridsel.x*gridsel.y*gridsel.z, 1);
+    Operator * oprod5 = new Operator(exc2->prods[0]);
+
+    gpu_to_cpu<WARPSIZE, 64, buffer_t *> g2c(oprod5, 1);
+
+    Operator * oprod4 = cuda_new<Operator>(1, g2c.teleporter_thrower);
+
+    unstable_select<> *s = cuda_new<unstable_select<>>(1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
     Operator * oprod3 = cuda_new<Operator>(1, s);
 
     vector<int>         prod_loc        = {-1};

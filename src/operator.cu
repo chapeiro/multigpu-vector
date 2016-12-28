@@ -5,6 +5,7 @@
 #include "materializer.cuh"
 #include "exchange.cuh"
 #include "select2.cuh"
+#include "gpu_to_cpu.cuh"
 
 // template<typename T>
 // __host__ __device__ void push::operator()(T op) const{
