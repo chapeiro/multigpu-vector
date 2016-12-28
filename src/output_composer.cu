@@ -3,20 +3,19 @@
 #include "common.cuh"
 
 template<size_t warp_size, typename T>
-output_composer<warp_size, T>::output_composer(Operator * parent, int dev): parent(parent), elems(0){
+output_composer<warp_size, T>::output_composer(Operator * parent, int dev): parent(parent){
     set_device_on_scope d(dev);
 
-    buffer_pool<int32_t>::buffer_t ** buff;
-    gpu(cudaMallocHost(&buff, sizeof(buffer_pool<int32_t>::buffer_t *)));
+    // buffer_pool<int32_t>::buffer_t ** buff;
+    // gpu(cudaMallocHost(&buff, sizeof(buffer_pool<int32_t>::buffer_t *)));
     cudaStream_t strm;
     cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
 
-    buffer_manager<int32_t>::h_get_buffer(buff, strm, dev);
+    output_buffer = buffer_manager<int32_t>::h_get_buffer(strm, dev);
 
     cudaStreamSynchronize(strm);
-    output_buffer = *buff;
     cudaStreamDestroy(strm);
-    cudaFreeHost(buff);
+    // cudaFreeHost(buff);
 }
 
 __global__ void launch(Operator *op, buffer_t * buff){
@@ -28,12 +27,7 @@ __host__ __device__ void output_composer<warp_size, T>::push(volatile T *src){
 #ifndef __CUDA_ARCH__
     assert(false);
 #else
-    uint32_t laneid;
-    asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
-
-    uint32_t elems_old;
-    if (laneid == 0) elems_old = atomicAdd(&elems, 4*warpSize);
-    elems_old = brdcst(elems_old, 0);
+    uint32_t laneid = get_laneid();
 
     __threadfence();
     vec4 tmp_out;
@@ -52,11 +46,11 @@ __host__ __device__ void output_composer<warp_size, T>::push(volatile T *src){
 
             if (repl){
                 printf("releasing filled buffer %llx\n", repl);
-                        cudaStream_t s;
-                        cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
-                        launch<<<1, 1, 0, s>>>(parent, repl);
-                        cudaStreamDestroy(s);
-                // parent->consume(repl);
+                        // cudaStream_t s;
+                        // cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
+                        // launch<<<1, 1, 0, s>>>(parent, repl);
+                        // cudaStreamDestroy(s);
+                parent->consume(repl);
                 // parent->consume(repl); //FIXME: check for overflows
             }
         }
@@ -76,8 +70,7 @@ __host__ __device__ void output_composer<warp_size, T>::push_flush(T *buffer, ui
 
     bool ellig = (blocki == 0) && (warpid == 0);
 
-    uint32_t laneid;
-    asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+    uint32_t laneid = get_laneid();
     
     buffer_t * outbuff = (buffer_t *) output_buffer;
     if (ellig){
@@ -94,11 +87,12 @@ __host__ __device__ void output_composer<warp_size, T>::push_flush(T *buffer, ui
                 assert(n_endofbuffers);
 
                 if (repl){
-                    printf("releasing filled buffer %llx\n", repl);
-                    cudaStream_t s;
-                    cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
-                    launch<<<1, 1, 0, s>>>(parent, repl);
-                    cudaStreamDestroy(s);
+                        printf("releasing filled buffer %llx\n", repl);
+                        cudaStream_t s;
+                        cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
+                        launch<<<1, 1, 0, s>>>(parent, repl);
+                        cudaStreamDestroy(s);
+                    // parent->consume(repl);
                     // printf("releasi----------ng filled buffer %llx\n", repl);
                     // outpool->release_buffer(repl); //FIXME: check for overflows
                 }

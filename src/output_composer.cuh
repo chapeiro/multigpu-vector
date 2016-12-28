@@ -12,7 +12,6 @@ private:
     static_assert(sizeof(T)*8 == 32, "Operator is only implemented for data types of 32-bits size");
     Operator                      * parent;
     volatile buffer_t * volatile    output_buffer;
-    uint32_t                        elems;
 public:
     output_composer(Operator * parent, int dev = 0);
 

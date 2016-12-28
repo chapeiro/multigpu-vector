@@ -33,6 +33,15 @@ __host__ __device__ void materializer::consume(buffer_pool<int32_t>::buffer_t * 
 #endif
 }
 
+__host__ __device__ void materializer::join(){
+#ifdef __CUDA_ARCH__
+    assert(false);
+#else
+    cout << "=" << chrono::duration_cast<chrono::milliseconds>(ms).count() << endl;
+#endif
+}
+
+
 // __host__ __device__ void materializer::consume(buffer_pool<int32_t>::buffer_t * data){
 // #ifdef __CUDA_ARCH__
 //     assert(false);

@@ -158,35 +158,37 @@ __host__ __device__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
     assert(false);
 #else
     if (device >= 0){
+        // execs.emplace_back([buff_l, this](){
         //parent is running on device
         set_device_on_scope d(device);
 
-        cudaEvent_t event;
+        // cudaEvent_t event;
 
-        gpu(cudaEventCreate(&event));
+        // gpu(cudaEventCreate(&event));
         
 
         //move buffer
-        buffer_manager<int32_t>::h_get_buffer(this->buff, strm2, device);
+        buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(strm2, device);
 
         buffer_pool_t::buffer_t::inspector_t from(strm2);
         buffer_pool_t::buffer_t::inspector_t to  (strm2);
 
         from.load(buff_l, true);
-        to.load(*(this->buff), true);
+        to.load(buff, true);
         
         to.overwrite(from.data(), from.count());
 
-        to.save(*(this->buff), true);
-        gpu(cudaEventRecord(event, strm2));
+        to.save(buff, true);
+        // gpu(cudaEventRecord(event, strm2));
 
-        gpu(cudaStreamWaitEvent(strm, event, 0));
+        // gpu(cudaStreamWaitEvent(strm, event, 0));
 
         //launch on buffer
-        launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent, *(this->buff));
+        launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent, buff);
 #ifndef NQUEUE_WORK
         gpu(cudaStreamSynchronize(strm));
 #endif
+        // });
     } else {
         //parent is running on host
         parent->consume(buff_l);
@@ -206,8 +208,6 @@ __host__ consumer::consumer(Operator *parent, dim3 dimGrid, dim3 dimBlock, int s
         cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
         cudaStreamCreateWithFlags(&strm2, cudaStreamNonBlocking);
 
-        gpu(cudaMallocHost(&buff, sizeof(buffer_pool<int32_t>::buffer_t *)));
-
         // shared_mem = 0;//getSharedMemoryRequirements();
     }
 }
@@ -217,6 +217,7 @@ __global__ void launch_close_pipeline(Operator * parent){
 }
 
 __host__ __device__ void consumer::join(){
+    for (auto &t: execs) t.join();
     if (device >= 0){
         set_device_on_scope d(device);
         launch_close_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent);

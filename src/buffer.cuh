@@ -40,6 +40,8 @@ public:
         }
     }
 
+    __host__ buffer(T* data, int device): cnt(0), data(data), device(device){}
+
     __host__ ~buffer(){
         if (device >= 0){
             cudaFree(data);

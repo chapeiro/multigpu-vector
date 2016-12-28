@@ -20,6 +20,8 @@
 
 #include "select2.cuh"
 
+// #include <nvToolsExt.h>
+
 using namespace std;
 
 #ifndef NVAL
@@ -39,12 +41,15 @@ int main(){
     
     a = (int32_t*) malloc(N*sizeof(int32_t));
     b = (int32_t*) malloc(N*sizeof(int32_t));
+    
+    // nvtxMarkA("Start");
 
     for (int i = 0 ; i < N ; ++i) a[i] = rand() % 100 + 1;
 
+    // nvtxMarkA("End");
+
     int32_t *dst;
     gpu(cudaMallocHost(&dst, sizeof(int32_t)*N));
-
 
     materializer *mat = new materializer(NULL, dst);//, cout);
     Operator * omat = new Operator(mat);

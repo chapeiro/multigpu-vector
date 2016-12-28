@@ -29,7 +29,7 @@ public:
 
     __host__ __device__ void consume(buffer_pool<int32_t>::buffer_t * data);
 
-    __host__ __device__ void join(){cout << "=" << chrono::duration_cast<chrono::milliseconds>(ms).count() << endl;}
+    __host__ __device__ void join();
 };
 
 #endif /* MATERIALIZER_CUH_ */

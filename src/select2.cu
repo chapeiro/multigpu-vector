@@ -29,6 +29,8 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_warp(const vec4 
 
     const int32_t prevwrapmask      = (1 << laneid) - 1;
 
+    // volatile int32_t *fcount      = (int32_t *) s;
+    // volatile int32_t *wrapoutbase = (int32_t *) (s + (width + warpSize - 1) / warpSize);
     volatile int32_t *wrapoutbase   = ((int32_t *) s);
     volatile int32_t *fcount        = ((int32_t *) s) + 5 * warpSize * (((width + warpSize - 1) / warpSize) + 1);
     volatile int32_t *wrapoutput    = wrapoutbase + 5 * warpSize * warpid;
@@ -87,6 +89,8 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_close(){
 
     const int32_t gridwidth         = gridDim.x     * gridDim.y ;
 
+    // volatile int32_t *fcount      = (int32_t *) s;
+    // volatile int32_t *wrapoutbase = (int32_t *) (s + (width + warpSize - 1) / warpSize);
     volatile int32_t *wrapoutbase = ((int32_t *) s);
     volatile int32_t *fcount      = ((int32_t *) s) + 5 * warpSize * (((width + warpSize - 1) / warpSize) + 1);
     volatile int32_t *wrapoutput  = wrapoutbase + 5 * warpSize * warpid;

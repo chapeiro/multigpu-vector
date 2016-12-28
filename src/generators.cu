@@ -4,6 +4,9 @@
 #include <iostream>
 #include <chrono>
 
+// #include <thread>
+// #include <chrono>
+
 using namespace std;
 
 __host__ generator::generator(Operator * parent, int32_t *src, uint32_t N):
