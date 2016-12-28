@@ -17,6 +17,7 @@ extern mutex                                              *devive_buffs_mutex;
 extern vector<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *> *device_buffs_pool;
 extern buffer<int32_t, DEFAULT_BUFF_CAP, vec4>          ***device_buff;
 extern int                                                 device_buff_size;
+extern int                                                 keep_threshold;
 
 extern cudaStream_t                                       *release_streams;
 
@@ -25,7 +26,7 @@ extern threadsafe_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int3
 template<typename T>
 class buffer_manager;
 
-__global__ void release_buffer_host(buffer<int32_t, DEFAULT_BUFF_CAP> *buff);
+__global__ void release_buffer_host(buffer<int32_t, DEFAULT_BUFF_CAP> **buff, int buffs = 1);
 __global__ void get_buffer_host    (buffer<int32_t, DEFAULT_BUFF_CAP> **buff, int buffs = 1);
 
 template<typename T = int32_t>
@@ -36,7 +37,7 @@ public:
     typedef lockfree_stack<buffer_t *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL>        pool_t;
     typedef threadsafe_stack<buffer_t *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL>      h_pool_t;
 
-    static __host__ void init(int size = 1024, int buff_buffer_size = 8){
+    static __host__ void init(int size = 1024, int buff_buffer_size = 8, int buff_keep_threshold = 16){
         int devices;
         gpu(cudaGetDeviceCount(&devices));
         devive_buffs_mutex = new mutex[devices];
@@ -80,6 +81,7 @@ public:
 
         device_buff      = new buffer_t**[devices];
         device_buff_size = buff_buffer_size;
+        keep_threshold   = buff_keep_threshold;
         buffer_t **tmp;
         gpu(cudaMallocHost(&tmp, device_buff_size*sizeof(buffer_t *)*devices));
         for (int i = 0 ; i < devices ; ++i) device_buff[i] = tmp + device_buff_size*sizeof(buffer_t *)*devices;
@@ -93,7 +95,7 @@ public:
 #endif
     }
 
-    static __device__ bool try_get_buffer(buffer_t **ret){
+    static __device__ bool try_get_buffer2(buffer_t **ret){
 #ifdef __CUDA_ARCH__
         if (pool->try_pop(ret)){
 #else
@@ -109,8 +111,8 @@ public:
         unique_lock<std::mutex> lock(devive_buffs_mutex[dev]);
         if (device_buffs_pool[dev].empty()){
             set_device_on_scope d(dev);
-            get_buffer_host<<<1, 1, 0, strm>>>(device_buff[dev], device_buff_size);
-            gpu(cudaStreamSynchronize(strm));
+            get_buffer_host<<<1, 1, 0, release_streams[dev]>>>(device_buff[dev], device_buff_size);
+            gpu(cudaStreamSynchronize(release_streams[dev]));
             device_buffs_pool[dev].insert(device_buffs_pool[dev].end(), device_buff[dev], device_buff[dev]+device_buff_size);
             // gpu(cudaFreeHost(buff));
         }
@@ -128,9 +130,17 @@ public:
         int dev = get_device(buff);
         if (dev >= 0){
             set_device_on_scope d(dev);
-            release_buffer_host<<<1, 1, 0, release_streams[dev]>>>(buff);
-            // gpu(cudaPeekAtLastError()  );
-            // gpu(cudaDeviceSynchronize());
+            unique_lock<std::mutex> lock(devive_buffs_mutex[dev]);
+            device_buffs_pool[dev].push_back(buff);
+            size_t size = device_buffs_pool[dev].size();
+            if (size > keep_threshold){
+                for (int i = 0 ; i < device_buff_size ; ++i) device_buff[dev][i] = device_buffs_pool[dev][size-i-1];
+                device_buffs_pool[dev].erase(device_buffs_pool[dev].end()-device_buff_size, device_buffs_pool[dev].end());
+                release_buffer_host<<<1, 1, 0, release_streams[dev]>>>(device_buff[dev], device_buff_size);
+                gpu(cudaStreamSynchronize(release_streams[dev]));
+                // gpu(cudaPeekAtLastError()  );
+                // gpu(cudaDeviceSynchronize());
+            }
         } else {
             h_pool->push(buff);
         }
@@ -159,7 +169,8 @@ public:
         if (replaced) *replaced = NULL;
         while (!outbuff->may_write()){
             buffer_t * tmp;
-            if (try_get_buffer(&tmp)){ //NOTE: we can not get the current buffer as answer, as it is not released yet
+            if (pool->try_pop(&tmp)){ //NOTE: we can not get the current buffer as answer, as it is not released yet
+                tmp->clean();
                 // assert(tmp != outbuff); //NOTE: we can... it may have been released
                 buffer_t * oldb = atomicCAS(ret, outbuff, tmp); //FIXME: ABA problem
                 if (oldb != outbuff) release_buffer(tmp);
