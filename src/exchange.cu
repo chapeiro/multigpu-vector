@@ -2,6 +2,7 @@
 #include <iostream>
 #include "common.cuh"
 #include "buffer_manager.cuh"
+#include "operator.cuh"
 
 using namespace std;
 
@@ -25,15 +26,16 @@ exchange::exchange(const vector<int> &prod_loc, const vector<int> &prodout_loc,
     }
 
     for (size_t i = 0 ; i < prod_loc.size() ; ++i){
-        producer * prod;
+        // producer * prod;
         if (prod_loc[i] >= 0){
             assert(prod2out[i] >= 0);
             assert(prod2out[i] < prodout_loc.size());
-            prod = cuda_new<producer>(prod_loc[i], prod_output_holders[prod2out[i]]);
+            assert(false);
+            // prods.emplace_back(d_operator_t::create<producer>(prod_loc[i], prod_output_holders[prod2out[i]]);
         } else {
-            prod = new producer(this);
+            prods.emplace_back(h_operator_t::create<producer>(this));
         }
-        prods.push_back(prod);
+        // prods.push_back(prod);
     }
 
     for (size_t i = 0 ; i < prodout_loc.size() ; ++i){

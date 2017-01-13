@@ -70,7 +70,7 @@ public:
 
 public:
     vector<buffer_pool_t *>             prod_output_holders;
-    vector<producer      *>             prods;
+    vector<h_operator_t  *>             prods;
     vector<thread>                      pollers;
     vector<thread>                      firers;
 

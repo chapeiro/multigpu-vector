@@ -3,21 +3,34 @@
 #include "buffer_manager.cuh"
 
 template<size_t warp_size, size_t size, typename T>
-gpu_to_cpu_dev<warp_size, size, T>::gpu_to_cpu_dev(volatile T *store, volatile int *flags, volatile int *eof, int dev): 
-        lock(0), end(0), store(store), flags(flags), eof(eof){
-    set_device_on_scope d(dev);
+gpu_to_cpu<warp_size, size, T>::gpu_to_cpu(h_operator_t * parent, int device): 
+            lock(0), end(0){
+    gpu(cudaMallocHost(&store, (sizeof(T)+sizeof(int))*size + sizeof(int)));
 
-    // buffer_pool<int32_t>::buffer_t ** buff;
-    // gpu(cudaMallocHost(&buff, sizeof(buffer_pool<int32_t>::buffer_t *)));
-    // cudaStream_t strm;
-    // cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
+    flags      = (volatile int *) (store + size);
 
-    output_buffer = buffer_manager<int32_t>::h_get_buffer(dev);
+    for (int i = 0 ; i < size ; ++i) flags[i] = 0;
+    // printf("Init %llu %d\n", flags, flags[0]);
+
+    eof        = flags + size;
+
+    *eof       = 0;
+
+    teleporter_catcher_obj = new gpu_to_cpu_host<warp_size, size, T>(parent, store, flags, eof);
+
+    teleporter_catcher = new thread(&gpu_to_cpu_host<warp_size, size, T>::catcher, teleporter_catcher_obj);
+
+    output_buffer = buffer_manager<int32_t>::h_get_buffer(device);
 }
 
 template<size_t warp_size, size_t size, typename T>
-__host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::throw2cpu(T data){
-#ifdef __CUDA_ARCH__
+gpu_to_cpu_host<warp_size, size, T>::gpu_to_cpu_host(h_operator_t *parent, volatile T *store, volatile int *flags, volatile int *eof): 
+            parent(parent), front(0), store(store), flags(flags), eof(eof){
+}
+
+
+template<size_t warp_size, size_t size, typename T>
+__device__ void gpu_to_cpu<warp_size, size, T>::throw2cpu(T data){
     if (get_laneid() == 0){
         while (atomicCAS((int *) &lock, 0, 1));
 
@@ -33,14 +46,10 @@ __host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::throw2cpu(T data){
         assert(lock == 1);
         lock = 0;
     }
-#else
-    assert(false);
-#endif
 }
 
 template<size_t warp_size, size_t size, typename T>
-__host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::consume_warp(const int32_t *src, unsigned int N){
-#ifdef __CUDA_ARCH__
+__device__ void gpu_to_cpu<warp_size, size, T>::consume_warp(const int32_t *src, unsigned int N){
     const uint32_t laneid = get_laneid();
     if (N == 4 * warp_size){
         // output.push(x);
@@ -84,15 +93,10 @@ __host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::consume_warp(const 
             outbuff = (buffer_t *) output_buffer;
         }
     }
-#else
-    assert(false);
-#endif
 }
 
-
 template<size_t warp_size, size_t size, typename T>
-__host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::close(){
-#ifdef __CUDA_ARCH__
+__device__ void gpu_to_cpu<warp_size, size, T>::close(){
     const int32_t blocki  = blockIdx.x  +  blockIdx.y *  gridDim.x;
     const int32_t warpid  = get_warpid();
 
@@ -108,50 +112,19 @@ __host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::close(){
 
     *eof = 1;
     __threadfence_system();
-#else
-    assert(false);
-#endif
+}
+
+
+template<size_t warp_size, size_t size, typename T>
+__device__ void gpu_to_cpu<warp_size, size, T>::consume_open(){
 }
 
 template<size_t warp_size, size_t size, typename T>
-__host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::consume_open(){
-#ifdef __CUDA_ARCH__
-#else
-    assert(false);
-#endif
+__device__ void gpu_to_cpu<warp_size, size, T>::consume_close(){
 }
 
 template<size_t warp_size, size_t size, typename T>
-__host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::consume_close(){
-#ifdef __CUDA_ARCH__
-#else
-    assert(false);
-#endif
-}
-
-template<size_t warp_size, size_t size, typename T>
-__host__ __device__ void gpu_to_cpu_dev<warp_size, size, T>::open(){
-#ifdef __CUDA_ARCH__
-#else
-    assert(false);
-#endif
-}
-
-template<size_t warp_size, size_t size, typename T>
-gpu_to_cpu<warp_size, size, T>::gpu_to_cpu(h_operator_t * parent, int device): parent(parent), front(0){
-    gpu(cudaMallocHost(&store, (sizeof(T)+sizeof(int))*size + sizeof(int)));
-    flags      = (volatile int *) (store + size);
-
-    for (int i = 0 ; i < size ; ++i) flags[i] = 0;
-    // printf("Init %llu %d\n", flags, flags[0]);
-
-    eof        = flags + size;
-
-    *eof       = 0;
-
-    teleporter_thrower = cuda_new<gpu_to_cpu_dev<warp_size, size, T>>(device, store, flags, eof, device);
-
-    teleporter_catcher = new thread(&gpu_to_cpu<warp_size, size, T>::catcher, this);
+__device__ void gpu_to_cpu<warp_size, size, T>::open(){
 }
 
 template<size_t warp_size, size_t size, typename T>
@@ -159,13 +132,14 @@ gpu_to_cpu<warp_size, size, T>::~gpu_to_cpu(){
     teleporter_catcher->join();
 
     delete teleporter_catcher;
-    
-    cuda_delete(teleporter_thrower);
+
     gpu(cudaFreeHost((void *) store));
 }
 
+
+
 template<size_t warp_size, size_t size, typename T>
-void gpu_to_cpu<warp_size, size, T>::catcher(){
+void gpu_to_cpu_host<warp_size, size, T>::catcher(){
     while (true){
         while (flags[front] != 1) {
             if (*eof == 1){
@@ -183,4 +157,4 @@ void gpu_to_cpu<warp_size, size, T>::catcher(){
 }
 
 template class gpu_to_cpu<WARPSIZE, 64, buffer_t *>;
-template class gpu_to_cpu_dev<WARPSIZE, 64, buffer_t *>;
+template class gpu_to_cpu_host<WARPSIZE, 64, buffer_t *>;

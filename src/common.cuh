@@ -136,22 +136,22 @@ __host__ T * cuda_new(int dev, Args... args){
         T *res;
         gpu(cudaMalloc((void**) &res, sizeof(T)));
         gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaDeviceSynchronize());
         free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
                     //      trigger initialization but we want to free the 
                     //      corresponding memory after moving to device 
                     //      without triggering the destructor
-        gpu(cudaDeviceSynchronize());
         return res;
     } else {
         T *tmp = new T(args...);
         T *res;
         gpu(cudaMallocHost((void**) &res, sizeof(T)));
         gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaDeviceSynchronize());
         free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
                     //      trigger initialization but we want to free the 
                     //      corresponding memory after moving to device 
                     //      without triggering the destructor
-        gpu(cudaDeviceSynchronize());
         return res;
         // return new T(args...);
     }

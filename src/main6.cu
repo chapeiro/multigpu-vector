@@ -73,8 +73,8 @@ int main(){
     int32_t *dst;
     gpu(cudaMallocHost(&dst, sizeof(int32_t)*N));
 
-    materializer *mat = new materializer(dst);//, cout);
-    h_operator_t * omat = new h_operator_t(mat);
+    // materializer *mat = new materializer(dst);//, cout);
+    h_operator_t * omat = h_operator_t::create<materializer>(dst);//new h_operator_t(mat);
     
     // vector<int>         prod_loc2        = {1};
     // vector<int>         prodout_loc2     = {1};
@@ -119,14 +119,17 @@ int main(){
 
     dim3 gridsel(8);
 
-    h_operator_t * oprod5 = new h_operator_t(exc2->prods[0]);
+    h_operator_t * oprod5 = exc2->prods[0];
 
-    gpu_to_cpu<WARPSIZE, 64, buffer_t *> g2c(oprod5, 1);
+    // gpu_to_cpu<WARPSIZE, 64, buffer_t *> g2c(oprod5, 1);
 
-    d_operator_t * oprod4 = cuda_new<d_operator_t>(1, g2c.teleporter_thrower);
+    d_operator_t * oprod4 = d_operator_t::create<gpu_to_cpu<WARPSIZE, 64, buffer_t *>>(1, oprod5, 1);// g2c.teleporter_thrower;
 
-    unstable_select<> *s = cuda_new<unstable_select<>>(1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
-    d_operator_t * oprod3 = cuda_new<d_operator_t>(1, s);
+    // unstable_select<> *s = cuda_new<unstable_select<>>(1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
+    // d_operator_t * oprod3 = cuda_new<d_operator_t>(1, s);//1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
+
+    d_operator_t * oprod3 = d_operator_t::create<unstable_select<>>(1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
+
 
     vector<int>         prod_loc        = {-1};
     vector<int>         prodout_loc     = {-1};
@@ -145,7 +148,7 @@ int main(){
                                     parent_dimBlock,
                                     {40960}); //FIXME: shared memory...
 
-    h_operator_t * oprod = new h_operator_t(exc->prods[0]);
+    h_operator_t * oprod = exc->prods[0];
 
     generator *gen = new generator(oprod, a, N);
 
@@ -191,6 +194,7 @@ int main(){
     delete exc;
     // delete exc2;
 
+    const materializer * mat = omat->get<materializer *>();
     vector<int32_t> results(mat->dst, mat->dst + mat->size);
 
     cout << results.size() << endl;
