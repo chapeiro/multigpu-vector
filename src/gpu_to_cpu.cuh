@@ -3,7 +3,6 @@
 
 #include "buffer_pool.cuh"
 #include "operator.cuh"
-#include "output_composer.cuh"
 #include <thread>
 #include <atomic>
 
@@ -18,18 +17,27 @@ private:
     volatile T     *store;
     volatile int   *flags;
     volatile int   *eof;
+    volatile buffer_t * volatile    output_buffer;
+
+    __host__ __device__ void throw2cpu(T data);
 public:
-    gpu_to_cpu_dev(volatile T *store, volatile int *flags, volatile int *eof);
+    gpu_to_cpu_dev(volatile T *store, volatile int *flags, volatile int *eof, int device);
 
-    __host__ __device__ void consume(T data);
+    __host__ __device__ void open();
 
-    __host__ __device__ void join();
+    __host__ __device__ void consume_open();
+    __host__ __device__ void consume_warp(const int32_t *x, unsigned int N);
+    __host__ __device__ void consume_close();
+
+    // __host__ __device__ void consume(T data);
+
+    __host__ __device__ void close();
 };
 
 template<size_t warp_size = WARPSIZE, size_t size = 64, typename T = int32_t>
 class gpu_to_cpu{
 private:
-    Operator                               *parent;
+    h_operator_t                           *parent;
     volatile T                             *store;
     volatile int                           *flags;
     volatile int                           *eof;
@@ -44,7 +52,7 @@ private:
     void catcher();
 
 public:
-    gpu_to_cpu(Operator * parent, int device);
+    gpu_to_cpu(h_operator_t * parent, int device);
     ~gpu_to_cpu();
 };
 

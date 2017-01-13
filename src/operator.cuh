@@ -27,41 +27,48 @@ typedef buffer_pool_t::buffer_t buffer_t;
 //     __host__ __device__ void operator()(T op) const;
 // };
 
-class Operator{
+
+class d_operator_t{
 private:
-    typedef variant::variant<generator *, materializer *, producer *, unstable_select<32, int32_t> *, gpu_to_cpu_dev<32, 64, buffer_t *> *> op_t;
+    typedef variant::variant<unstable_select<32, int32_t> *, gpu_to_cpu_dev<32, 64, buffer_t *> *> op_t;
     op_t op;
 
 public:
     template<typename Op>
-    __host__ Operator(Op * op): op(op){
-    }
+    __host__ d_operator_t(Op * op): op(op){}
 
-    // __device__ __host__ void open();
+    __device__ void open();
+    __device__ void consume_open();
+    __device__ void consume_warp(const int32_t *x, unsigned int N);
+    __device__ void consume_close();
+    __device__ void close();
 
-    __device__ __host__ void consume(buffer_t * buff);
-    
-    __device__ __host__ void close();
-
-    __host__ ~Operator();
+    __host__ ~d_operator_t();
 };
-// template<typename T>
-// class Operator{
-// protected:
-//     vector<Operator *> parents;
 
-// public:
-//     Operator(const vector<Operator *> &parents): parents(parents){}
+class h_operator_t{
+private:
+    typedef variant::variant<generator *, materializer *, producer *> op_t;
+    op_t op;
 
-//     // virtual __host__ int getSharedMemoryRequirements(){
-//     //     int s = 0;
-//     //     for (const auto &p: parents) if (p) s += 0;//FIXME: may be invoked on object of another device eg CPU2GPU p->getSharedMemoryRequirements();
-//     //     return s;
-//     // }
+public:
+    template<typename Op>
+    __host__ h_operator_t(Op * op): op(op){}
 
-//     __host__ __device__ void consume(buffer_pool<int32_t>::buffer_t * data){
-//         T::consume(data);
-//     }
-// };
+    __host__ void open();
+    __host__ void consume(buffer_t * buff);
+    __host__ void close();
+
+    __host__ ~h_operator_t();
+};
+
+union p_operator_t{
+    d_operator_t *d;
+    h_operator_t *h;
+
+    p_operator_t(){}
+    p_operator_t(d_operator_t *d): d(d){}
+    p_operator_t(h_operator_t *h): h(h){}
+};
 
 #endif /* OPERATOR_CUH_ */

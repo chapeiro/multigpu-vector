@@ -2,7 +2,6 @@
 #define MATERIALIZER_CUH_
 
 #include "buffer_pool.cuh"
-#include "operator.cuh"
 #include <vector>
 #include <chrono>
 #include <deque>
@@ -22,14 +21,14 @@ public://FIXME: remove
     
     chrono::microseconds ms;
 public:
-    __host__ materializer(Operator * parent, int32_t *dst);
+    __host__ materializer(int32_t *dst);
     // __host__ materializer(Operator * parent, ostream &out);
 
     __host__ __device__ void open(){}
 
     __host__ __device__ void consume(buffer_pool<int32_t>::buffer_t * data);
 
-    __host__ __device__ void join();
+    __host__ __device__ void close();
 };
 
 #endif /* MATERIALIZER_CUH_ */

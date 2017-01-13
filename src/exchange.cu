@@ -7,7 +7,7 @@ using namespace std;
 
 exchange::exchange(const vector<int> &prod_loc, const vector<int> &prodout_loc, 
                     const vector<int> &prodout_size, const vector<int> &prod2out,
-                    const vector<Operator *> &parents,
+                    const vector<p_operator_t> &parents,
                     const vector<dim3> &parent_dimGrid,
                     const vector<dim3> &parent_dimBlock,
                     const vector<int>  &shared_mem){
@@ -97,7 +97,7 @@ __host__ void exchange::fire(consumer *cons){
         cout << "T:" << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
 
 
-    cons->join();
+    // cons->close();
 }
 
 __host__ void exchange::set_ready(buffer_pool_t::buffer_t * buff){
@@ -148,15 +148,36 @@ __host__ __device__ void producer::consume(buffer_pool_t::buffer_t * buff){
 
 // __device__ con pfunc1 = (con) producer::consume;
 
-__global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(Operator * op, consumer::buffer_t * buff){
-    op->consume(buff);
+__global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t * op, consumer::buffer_t * buff){
+    // op->consume(buff);
     // variant::apply_visitor(push(buff), *op);
+
+    const int32_t width     = blockDim.x    * blockDim.y;
+    const int32_t gridwidth = gridDim.x     * gridDim.y ;
+    const int32_t bigwidth  = width         * gridwidth ;
+
+    const int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
+    const int32_t blocki  =  blockIdx.x +  blockIdx.y *  gridDim.x;
+
+    uint32_t N   = min(buff->cnt, buff->capacity());//insp->count();
+    const int32_t *src = buff->data;
+
+    op->consume_open();
+    
+    __syncthreads();
+
+    for (int j = 0 ; j < N/4 ; j += bigwidth){
+        // vec4 tmp = reinterpret_cast<const vec4*>(src)[i+j+blocki*width];
+
+        op->consume_warp(src + 4 * (i+j+blocki*width), min(N - 4*(i+j+blocki*width), 4*warpSize));
+    }
+
+    __syncthreads();
+
+    op->consume_close();
 }
 
-__host__ __device__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
-#ifdef __CUDA_ARCH__
-    assert(false);
-#else
+__host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
     if (device >= 0){
         // execs.emplace_back([buff_l, this](){
         //parent is running on device
@@ -184,23 +205,22 @@ __host__ __device__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
         // gpu(cudaStreamWaitEvent(strm, event, 0));
 
         //launch on buffer
-        launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent, buff);
+        launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff);
 #ifndef NQUEUE_WORK
         gpu(cudaStreamSynchronize(strm));
 #endif
         // });
     } else {
         //parent is running on host
-        parent->consume(buff_l);
+        parent.h->consume(buff_l); //FIXME : not implemented
         // variant::apply_visitor(push(buff), *parent);
     }
-#endif
 }
 
-__host__ consumer::consumer(Operator *parent, dim3 dimGrid, dim3 dimBlock, int shared_mem): dimGrid(dimGrid), dimBlock(dimBlock), parent(parent), shared_mem(shared_mem){
-    assert(parent);
+__host__ consumer::consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, int shared_mem): parent(parent), dimGrid(dimGrid), dimBlock(dimBlock), shared_mem(shared_mem){
+    assert(parent.h);
 
-    device = get_device(parent);
+    device = get_device(parent.h);
 
     if (device >= 0){
         set_device_on_scope d(device);
@@ -211,20 +231,52 @@ __host__ consumer::consumer(Operator *parent, dim3 dimGrid, dim3 dimBlock, int s
         // shared_mem = 0;//getSharedMemoryRequirements();
     }
 }
-__global__ void launch_close_pipeline(Operator * parent){
+
+// __host__ consumer::consumer(h_operator_t *parent, dim3 dimGrid, dim3 dimBlock, int shared_mem): dimGrid(dimGrid), dimBlock(dimBlock), shared_mem(shared_mem){
+//     assert(parent);
+
+//     this->parent.h = parent;
+
+//     device = get_device(parent);
+
+//     if (device >= 0){
+//         set_device_on_scope d(device);
+
+//         cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
+//         cudaStreamCreateWithFlags(&strm2, cudaStreamNonBlocking);
+
+//         // shared_mem = 0;//getSharedMemoryRequirements();
+//     }
+// }
+
+__global__ void launch_open_pipeline(d_operator_t * parent){
+    parent->open();
+    // variant::apply_visitor(close{}, *parent);
+}
+
+__global__ void launch_close_pipeline(d_operator_t * parent){
     parent->close();
     // variant::apply_visitor(close{}, *parent);
 }
 
-__host__ __device__ void consumer::join(){
+__host__ void consumer::open(){
+    if (device >= 0){
+        set_device_on_scope d(device);
+        launch_open_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d);
+        gpu(cudaStreamSynchronize(strm));
+    } else {
+        parent.h->open();
+    }
+}
+
+__host__ void consumer::close(){
     for (auto &t: execs) t.join();
     if (device >= 0){
         set_device_on_scope d(device);
-        launch_close_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent);
+        launch_close_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d);
         gpu(cudaStreamSynchronize(strm));
     } else {
-        parent->close();
-        // variant::apply_visitor(close{}, *parent);
+        parent.h->close();
     }
 }
 
@@ -243,7 +295,7 @@ __host__ void exchange::join(){
     for (auto &t: pollers) t.join();
 }
 
-__host__ __device__ void producer::join(){
+__host__ __device__ void producer::close(){
     if (outpool) {
 #ifdef __CUDA_ARCH__
         if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&

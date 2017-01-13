@@ -9,17 +9,19 @@ using namespace std;
 
 class generator{
 private:
-    Operator                           *parent;
+    h_operator_t                       *parent;
     cudaStream_t                        strm;
     buffer_pool<int32_t>::buffer_t    **buff_ret;
     int32_t                            *src;
     uint32_t                            N;
 public:
-    __host__ generator(Operator * parent, int32_t *src, uint32_t N);
+    __host__ generator(h_operator_t * parent, int32_t *src, uint32_t N);
+
+    __host__ __device__ void open();
 
     __host__ __device__ void consume(buffer_pool<int32_t>::buffer_t * data);
 
-    __host__ __device__ void join();
+    __host__ __device__ void close();
 
     __host__ ~generator();
 };

@@ -1,7 +1,7 @@
 #include "materializer.cuh"
 #include "buffer_manager.cuh"
 
-__host__ materializer::materializer(Operator * parent, int32_t * dst): dst(dst), size(0), ms(0){//, out(&out){
+__host__ materializer::materializer(int32_t * dst): dst(dst), size(0), ms(0){//, out(&out){
     gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
     insp = new buffer_pool<int32_t>::buffer_t::inspector_t(strm);
     gpu(cudaMallocHost(&out_buff, sizeof(int32_t)*buffer_pool<int32_t>::buffer_t::capacity()));
@@ -33,7 +33,7 @@ __host__ __device__ void materializer::consume(buffer_pool<int32_t>::buffer_t * 
 #endif
 }
 
-__host__ __device__ void materializer::join(){
+__host__ __device__ void materializer::close(){
 #ifdef __CUDA_ARCH__
     assert(false);
 #else

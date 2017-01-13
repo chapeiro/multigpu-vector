@@ -30,7 +30,8 @@ public:
 
     __host__ ~producer();
 
-    __host__ __device__ void join();
+    __host__ __device__ void open(){};
+    __host__ __device__ void close();
 
     __host__ __device__ void consume(buffer_t * data);
 };
@@ -45,18 +46,22 @@ private:
     cudaStream_t    strm2;
     dim3            dimGrid;
     dim3            dimBlock;
-    Operator       *parent;
+    p_operator_t    parent;
     vector<thread>  execs;
     
 public:
-    __host__ consumer(Operator *parent, dim3 dimGrid, dim3 dimBlock, int shared_mem);
+    __host__ consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, int shared_mem);
 
-    __host__ __device__ void consume(buffer_t * data);
+    __host__ void open();
 
-    __host__ __device__ void join();
+    __host__ void consume(buffer_t * data);
+
+    __host__ void close();
 
     __host__ ~consumer();
 };
+
+
 
 
 class exchange{
@@ -80,7 +85,7 @@ public:
 public:
     exchange(const vector<int> &prod_loc, const vector<int> &prodout_loc, 
                     const vector<int> &prodout_size, const vector<int> &prod2out,
-                    const vector<Operator *> &parents,
+                    const vector<p_operator_t> &parents,
                     const vector<dim3> &parent_dimGrid,
                     const vector<dim3> &parent_dimBlock,
                     const vector<int> &shared_mem);
