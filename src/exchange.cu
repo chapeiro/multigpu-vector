@@ -98,8 +98,7 @@ __host__ void exchange::fire(consumer *cons){
         auto end   = chrono::system_clock::now();
         cout << "T:" << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
 
-
-    // cons->close();
+    cons->close();
 }
 
 __host__ void exchange::set_ready(buffer_pool_t::buffer_t * buff){
@@ -158,10 +157,11 @@ __global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t
     const int32_t gridwidth = gridDim.x     * gridDim.y ;
     const int32_t bigwidth  = width         * gridwidth ;
 
-    const int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
-    const int32_t blocki  =  blockIdx.x +  blockIdx.y *  gridDim.x;
+    // const int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
+    const int32_t blocki  = blockIdx.x + blockIdx.y * gridDim.x;
+    const int32_t warpoff = get_warpid() * warpSize + blocki * width;
 
-    uint32_t N   = min(buff->cnt, buff->capacity());//insp->count();
+    const uint32_t N   = min(buff->cnt, buff->capacity());//insp->count();
     const int32_t *src = buff->data;
 
     op->consume_open();
@@ -171,7 +171,9 @@ __global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t
     for (int j = 0 ; j < N/4 ; j += bigwidth){
         // vec4 tmp = reinterpret_cast<const vec4*>(src)[i+j+blocki*width];
 
-        op->consume_warp(src + 4 * (i+j+blocki*width), min(N - 4*(i+j+blocki*width), 4*warpSize));
+        const int32_t offset = 4 * (warpoff+j);
+
+        op->consume_warp(src + offset, min(N - offset, 4*warpSize));
     }
 
     __syncthreads();

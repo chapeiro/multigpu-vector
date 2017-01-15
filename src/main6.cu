@@ -44,6 +44,7 @@ __global__ void launch_close_pipeline2(d_operator_t * parent){
 void stable_select_cpu(int32_t *a, int32_t *b, int N){
     int i = 0;
     for (int j = 0 ; j < N ; ++j) if (a[j] <= 50) b[i++] = a[j];
+    cout << i << endl;
     b[i] = -1;
 }
 
@@ -73,8 +74,7 @@ int main(){
     int32_t *dst;
     gpu(cudaMallocHost(&dst, sizeof(int32_t)*N));
 
-    // materializer *mat = new materializer(dst);//, cout);
-    h_operator_t * omat = h_operator_t::create<materializer>(dst);//new h_operator_t(mat);
+    h_operator_t * omat = h_operator_t::create<materializer>(dst);
     
     // vector<int>         prod_loc2        = {1};
     // vector<int>         prodout_loc2     = {1};
@@ -121,12 +121,7 @@ int main(){
 
     h_operator_t * oprod5 = exc2->prods[0];
 
-    // gpu_to_cpu<WARPSIZE, 64, buffer_t *> g2c(oprod5, 1);
-
-    d_operator_t * oprod4 = d_operator_t::create<gpu_to_cpu<WARPSIZE, 64, buffer_t *>>(1, oprod5, 1);// g2c.teleporter_thrower;
-
-    // unstable_select<> *s = cuda_new<unstable_select<>>(1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
-    // d_operator_t * oprod3 = cuda_new<d_operator_t>(1, s);//1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
+    d_operator_t * oprod4 = d_operator_t::create<gpu_to_cpu<WARPSIZE, 64, buffer_t *>>(1, oprod5, 1);
 
     d_operator_t * oprod3 = d_operator_t::create<unstable_select<>>(1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
 
@@ -165,8 +160,8 @@ int main(){
         exc->join();
 
         set_device_on_scope d(1);
-        launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod3);
-        gpu(cudaDeviceSynchronize());
+        // launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod3);
+        // gpu(cudaDeviceSynchronize());
         cout << "kkkkkkkkkkkkk " << endl;
         launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod4);
         gpu(cudaDeviceSynchronize());
@@ -210,7 +205,7 @@ int main(){
     sort(results.begin(), results.end());
 
     bool failed = false;
-    for (int i = 0 ; i < N ; ++i){
+    for (int i = 0 ; i < results.size() ; ++i){
         if (a[i] != results[i]){
             cout << "Wrong result " << results[i] << "vs" << a[i] << " at (sorted) " << i << endl;
             failed = true;
