@@ -83,8 +83,12 @@ public:
         device_buff_size = buff_buffer_size;
         keep_threshold   = buff_keep_threshold;
         buffer_t **tmp;
-        gpu(cudaMallocHost(&tmp, device_buff_size*sizeof(buffer_t *)*devices));
-        for (int i = 0 ; i < devices ; ++i) device_buff[i] = tmp + device_buff_size*sizeof(buffer_t *)*i;
+        // gpu(cudaMallocHost(&tmp, device_buff_size*sizeof(buffer_t *)*devices));
+        for (int i = 0 ; i < devices ; ++i) {
+            gpu(cudaMallocHost(&tmp, device_buff_size*sizeof(buffer_t *)));
+            device_buff[i] = tmp;
+            // device_buff[i] = tmp + device_buff_size*sizeof(buffer_t *)*i;
+        }
     }
 
     static __host__ __device__ buffer_t * get_buffer(){

@@ -90,11 +90,12 @@ public:
     }
 
     __device__ __forceinline__ bool try_write(const T4 &x) volatile{
-        uint32_t laneid;
-        asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+        uint32_t laneid = get_laneid();
         uint32_t old_cnt;
         if (laneid == 0) old_cnt = atomicAdd((uint32_t *) &cnt, 4*warpSize);
         old_cnt = brdcst(old_cnt, 0);
+
+        assert(old_cnt % (4*warpSize) == 0);
 
         if (old_cnt > size - 4*warpSize) return false;
         reinterpret_cast<T4 *>(data + old_cnt)[laneid] = x; //FIXME: someone may have not completed writing out everything when the buffer gets released!
@@ -103,12 +104,32 @@ public:
     }
 
     __device__ __forceinline__ bool try_partial_final_write(const T *x, uint32_t N) volatile{
-        uint32_t laneid;
-        asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
-        if (!try_write(reinterpret_cast<const T4 *>(x)[laneid])) return false;
-        if (laneid == 0) atomicSub((uint32_t *) &cnt, 4*warpSize - N);
-        // if (cnt + N > size) return false;
-        // cnt += N;
+        // uint32_t laneid;
+        // asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+        // if (!try_write(reinterpret_cast<const T4 *>(x)[laneid])) return false;
+        // if (laneid == 0) atomicSub((uint32_t *) &cnt, 4*warpSize - N);
+        // // if (cnt + N > size) return false;
+        // // cnt += N;
+        // return true;
+        uint32_t laneid = get_laneid();
+        uint32_t old_cnt;
+        assert(N < 4*warpSize);
+        if (laneid == 0) old_cnt = atomicAdd((uint32_t *) &cnt, N);
+        old_cnt = brdcst(old_cnt, 0);
+
+        if (old_cnt > size - N) {
+            if (laneid == 0) atomicSub((uint32_t *) &cnt, N);
+            return false;
+        }
+
+        #pragma unroll
+        for (int k = 0 ; k < 4 ; ++k){
+            if (k*warpSize + laneid < N){
+                data[old_cnt + k*warpSize + laneid] = x[k * warpSize + laneid];
+            }
+        }
+            // reinterpret_cast<T4 *>(data + old_cnt)[laneid] = x; //FIXME: someone may have not completed writing out everything when the buffer gets released!
+        // data[old_cnt + laneid] = x; //FIXME: someone may have not completed writing out everything when the buffer gets released!
         return true;
     }
 

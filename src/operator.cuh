@@ -10,6 +10,8 @@ class generator;
 class materializer;
 class exchange;
 class producer;
+template<size_t warp_size, int32_t neutral_value>
+class aggregation;
 template<size_t warp_size, typename T>
 class unstable_select;
 template<size_t warp_size, size_t size, typename T>
@@ -30,7 +32,7 @@ typedef buffer_pool_t::buffer_t buffer_t;
 
 class d_operator_t{
 private:
-    typedef variant::variant<unstable_select<32, int32_t> *, gpu_to_cpu<32, 64, buffer_t *> *> op_t;
+    typedef variant::variant<unstable_select<32, int32_t> *, gpu_to_cpu<32, 64, buffer_t *> *, aggregation<32, 0> *> op_t;
     op_t op;
 
     template<typename Op, typename... Args>

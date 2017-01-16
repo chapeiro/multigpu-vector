@@ -16,6 +16,7 @@
 #include "exchange.cuh"
 #include "materializer.cuh"
 #include "generators.cuh"
+#include "aggregation.cuh"
 
 #include "gpu_to_cpu.cuh"
 // #include <functional>
@@ -48,6 +49,14 @@ void stable_select_cpu(int32_t *a, int32_t *b, int N){
     b[i] = -1;
 }
 
+void sum_select_cpu(int32_t *a, int32_t *b, int N){
+    int i = 0;
+    int32_t s = 0;
+    for (int j = 0 ; j < N ; ++j) if (a[j] <= 50) s += a[j];
+    b[0] = s;
+    b[1] = -1;
+}
+
 int main(){
     setbuf(stdout, NULL);
     // gpu(cudaSetDeviceFlags(cudaDeviceScheduleYield));
@@ -66,7 +75,7 @@ int main(){
     
     {
         auto start = chrono::system_clock::now();
-        stable_select_cpu(a, c, N);
+        sum_select_cpu(a, c, N);
         auto end   = chrono::system_clock::now();
         cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
     }
@@ -123,7 +132,9 @@ int main(){
 
     d_operator_t * oprod4 = d_operator_t::create<gpu_to_cpu<WARPSIZE, 64, buffer_t *>>(1, oprod5, 1);
 
-    d_operator_t * oprod3 = d_operator_t::create<unstable_select<>>(1, oprod4, gridsel.x*gridsel.y*gridsel.z, 1);
+    d_operator_t * oprod3b = d_operator_t::create<aggregation<WARPSIZE, 0>>(1, oprod4, 8000, gridsel.x*gridsel.y*gridsel.z, 1);
+
+    d_operator_t * oprod3 = d_operator_t::create<unstable_select<>>(1, oprod3b, gridsel.x*gridsel.y*gridsel.z, 1);
 
 
     vector<int>         prod_loc        = {-1};
@@ -163,6 +174,8 @@ int main(){
         // launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod3);
         // gpu(cudaDeviceSynchronize());
         cout << "kkkkkkkkkkkkk " << endl;
+        launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod3b);
+        cout << "kkkkkkkkkkkkk " << endl;
         launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod4);
         gpu(cudaDeviceSynchronize());
 
@@ -199,6 +212,8 @@ int main(){
         // return -1;
         return 0;
     }
+
+    cout << results[0] << " ? " << c[0] << endl;
     return 0;
 #ifndef __CUDA_ARCH__
     sort(a, a + N);
