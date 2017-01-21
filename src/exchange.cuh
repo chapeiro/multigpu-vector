@@ -69,11 +69,8 @@ public:
     typedef buffer_pool<int32_t> buffer_pool_t;
 
 public:
-    vector<buffer_pool_t *>             prod_output_holders;
-    vector<h_operator_t  *>             prods;
-    vector<thread>                      pollers;
     vector<thread>                      firers;
-
+    
     atomic<int>                         remaining_producers;
 
     vector<buffer_pool_t::buffer_t *>   ready_pool;
@@ -83,12 +80,8 @@ public:
     __host__ void poll(buffer_pool_t * target);
     __host__ void fire(consumer *cons);
 public:
-    exchange(const vector<int> &prod_loc, const vector<int> &prodout_loc, 
-                    const vector<int> &prodout_size, const vector<int> &prod2out,
-                    const vector<p_operator_t> &parents,
-                    const vector<dim3> &parent_dimGrid,
-                    const vector<dim3> &parent_dimBlock,
-                    const vector<int> &shared_mem);
+    exchange(const vector<p_operator_t> &parents,
+                const vector<launch_conf> &parent_conf);
 
 public: //FIXME: friends...
     __host__ void set_ready(buffer_pool_t::buffer_t * buff);
@@ -96,7 +89,12 @@ public: //FIXME: friends...
     __host__ void producer_ended();
 
 public:
-    void join();
+    __host__ void open();
+
+    __host__ void consume(buffer_t * data);
+
+    __host__ void close();
+
     ~exchange();
 };
 

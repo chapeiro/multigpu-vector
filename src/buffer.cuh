@@ -201,8 +201,8 @@ public:
         assert(N <= size);
 
         gpu(cudaMemcpyAsync(buff->data, src, N*sizeof(T), cudaMemcpyDefault, strm));
-        if (blocking) gpu(cudaStreamSynchronize(strm));
         buff->cnt = N;
+        if (blocking) gpu(cudaStreamSynchronize(strm));
     }
 
     __host__ void read(T * dst, uint32_t N, bool blocking = true){

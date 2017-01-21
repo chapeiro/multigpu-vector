@@ -42,19 +42,17 @@ __global__ void launch_close_pipeline2(d_operator_t * parent){
     // variant::apply_visitor(close{}, *parent);
 }
 
-void stable_select_cpu(int32_t *a, int32_t *b, int N){
-    int i = 0;
-    for (int j = 0 ; j < N ; ++j) if (a[j] <= 50) b[i++] = a[j];
-    cout << i << endl;
-    b[i] = -1;
+size_t stable_select_cpu(int32_t *a, int32_t *b, int N){
+    size_t i = 0;
+    for (size_t j = 0 ; j < N ; ++j) if (a[j] <= 50) b[i++] = a[j];
+    return i;
 }
 
-void sum_select_cpu(int32_t *a, int32_t *b, int N){
-    int i = 0;
+size_t sum_select_cpu(int32_t *a, int32_t *b, int N){
     int32_t s = 0;
-    for (int j = 0 ; j < N ; ++j) if (a[j] <= 50) s += a[j];
+    for (size_t j = 0 ; j < N ; ++j) if (a[j] <= 50) s += a[j];
     b[0] = s;
-    b[1] = -1;
+    return 1;
 }
 
 int main(){
@@ -63,7 +61,10 @@ int main(){
     srand(time(0));
     buffer_manager<int32_t>::init();
     
-    a = (int32_t*) malloc(N*sizeof(int32_t));
+    // a = (int32_t*) malloc(N*sizeof(int32_t));
+
+    gpu(cudaMallocHost(&a, N*sizeof(int32_t)));
+
     b = (int32_t*) malloc(N*sizeof(int32_t));
     c = (int32_t*) malloc(N*sizeof(int32_t));
     
@@ -73,9 +74,10 @@ int main(){
 
     // nvtxMarkA("End");
     
+    size_t M;
     {
         auto start = chrono::system_clock::now();
-        sum_select_cpu(a, c, N);
+        M = sum_select_cpu(a, c, N);
         auto end   = chrono::system_clock::now();
         cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
     }
@@ -126,7 +128,7 @@ int main(){
                                     parent_dimBlock2,
                                     {0});
 
-    dim3 gridsel(8);
+    dim3 gridsel(16);
 
     h_operator_t * oprod5 = exc2->prods[0];
 
@@ -144,6 +146,7 @@ int main(){
     vector<p_operator_t> parents        = {oprod3};
     vector<dim3>        parent_dimGrid  = {gridsel};
     vector<dim3>        parent_dimBlock = {dim3(1024)};
+    vector<int>         shared_mem      = {40960};
 
     exchange *exc = new exchange(prod_loc, 
                                     prodout_loc, 
@@ -152,7 +155,7 @@ int main(){
                                     parents,
                                     parent_dimGrid,
                                     parent_dimBlock,
-                                    {40960}); //FIXME: shared memory...
+                                    shared_mem); //FIXME: shared memory...
 
     h_operator_t * oprod = exc->prods[0];
 
@@ -160,6 +163,7 @@ int main(){
 
     gpu(cudaProfilerStart());
 
+    // nvtxMarkA("Start");
     auto start = chrono::system_clock::now();
     // gen->consume(NULL);
     // exc2->join();
@@ -174,9 +178,9 @@ int main(){
         // launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod3);
         // gpu(cudaDeviceSynchronize());
         cout << "kkkkkkkkkkkkk " << endl;
-        launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod3b);
+        launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], shared_mem[0], 0>>>(oprod3b);
         cout << "kkkkkkkkkkkkk " << endl;
-        launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], 40960, 0>>>(oprod4);
+        launch_close_pipeline2<<<parent_dimGrid[0], parent_dimBlock[0], shared_mem[0], 0>>>(oprod4);
         gpu(cudaDeviceSynchronize());
 
         cout << "kkkkkkkkkkkkk " << endl;
@@ -193,6 +197,7 @@ int main(){
         // assert(false);
     }
     auto end   = chrono::system_clock::now();
+    // nvtxMarkA("End");
 
     gpu(cudaProfilerStop());
 
@@ -206,27 +211,28 @@ int main(){
     vector<int32_t> results(mat->dst, mat->dst + mat->size);
 
     cout << results.size() << endl;
-    if (results.size() != N){
+    
+    if (results.size() != M){
         cout << "Wrong output size!" << endl;
         // assert(false);
-        // return -1;
-        return 0;
+        return -1;
+        // return 0;
     }
-
-    cout << results[0] << " ? " << c[0] << endl;
-    return 0;
+    cout << results[0] << ((results[0] == c[0]) ? " = " : " ! ") << c[0] << endl;
+    // return 0;
 #ifndef __CUDA_ARCH__
-    sort(a, a + N);
+    sort(c, c + M);
     sort(results.begin(), results.end());
 
     bool failed = false;
-    for (int i = 0 ; i < results.size() ; ++i){
-        if (a[i] != results[i]){
-            cout << "Wrong result " << results[i] << "vs" << a[i] << " at (sorted) " << i << endl;
+    for (int i = 0 ; i < M ; ++i){
+        if (c[i] != results[i]){
+            cout << "Wrong result " << results[i] << "vs" << c[i] << " at (sorted) " << i << endl;
             failed = true;
         }
     }
-    assert(!failed);
+    // assert(!failed);
+    if (failed) return -1;
     cout << "End of Test" << endl;
 #endif
 

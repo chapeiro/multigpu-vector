@@ -17,11 +17,11 @@ private:
 public:
     __host__ generator(h_operator_t * parent, int32_t *src, uint32_t N);
 
-    __host__ __device__ void open();
+    __host__ void open();
 
-    __host__ __device__ void consume(buffer_pool<int32_t>::buffer_t * data);
+    __host__ void consume(buffer_pool<int32_t>::buffer_t * data);
 
-    __host__ __device__ void close();
+    __host__ void close();
 
     __host__ ~generator();
 };

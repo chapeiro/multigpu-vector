@@ -44,6 +44,21 @@ public:
     }
 };
 
+struct launch_conf{
+    dim3    gridDim     ;
+    dim3    blockDim    ;
+    int     shared_mem  ;
+    int     device      ;
+
+    int grid_size() const{
+        return gridDim.x  * gridDim.y  * gridDim.z ;
+    }
+
+    int block_size() const{
+        return blockDim.x * blockDim.y * blockDim.z;
+    }
+};
+
 template<typename T,
          typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
             int>::type = 0>

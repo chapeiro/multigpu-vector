@@ -38,6 +38,7 @@ __device__ void aggregation<warp_size, neutral_value>::consume_warp(const int32_
     }
 
     s[shared_offset + i] += aggr;
+    // atomicAdd(&res, aggr);
 }
 
 template<size_t warp_size, int32_t neutral_value>
@@ -51,10 +52,10 @@ __device__ void aggregation<warp_size, neutral_value>::consume_close(){
 }
 
 template<size_t warp_size, int32_t neutral_value>
-__device__ void aggregation<warp_size, neutral_value>::open(){}
+__device__ void aggregation<warp_size, neutral_value>::at_open(){}
 
 template<size_t warp_size, int32_t neutral_value>
-__device__ void aggregation<warp_size, neutral_value>::close(){
+__device__ void aggregation<warp_size, neutral_value>::at_close(){
     if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0){
         parent->consume_open();
         __syncthreads();
@@ -62,6 +63,20 @@ __device__ void aggregation<warp_size, neutral_value>::close(){
         __syncthreads();
         parent->consume_close();
     }
+}
+
+template<size_t warp_size, int32_t neutral_value>
+__host__ void aggregation<warp_size, neutral_value>::before_open(){
+    decltype(this->parent) p;
+    gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
+    p->open();
+}
+
+template<size_t warp_size, int32_t neutral_value>
+__host__ void aggregation<warp_size, neutral_value>::after_close(){
+    decltype(this->parent) p;
+    gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
+    p->close();
 }
 
 template class aggregation<>;

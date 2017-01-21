@@ -96,7 +96,7 @@ __device__ void gpu_to_cpu<warp_size, size, T>::consume_warp(const int32_t *src,
 }
 
 template<size_t warp_size, size_t size, typename T>
-__device__ void gpu_to_cpu<warp_size, size, T>::close(){
+__device__ void gpu_to_cpu<warp_size, size, T>::at_close(){
     const int32_t blocki  = blockIdx.x  +  blockIdx.y *  gridDim.x;
     const int32_t warpid  = get_warpid();
 
@@ -124,7 +124,7 @@ __device__ void gpu_to_cpu<warp_size, size, T>::consume_close(){
 }
 
 template<size_t warp_size, size_t size, typename T>
-__device__ void gpu_to_cpu<warp_size, size, T>::open(){
+__device__ void gpu_to_cpu<warp_size, size, T>::at_open(){
 }
 
 template<size_t warp_size, size_t size, typename T>
@@ -135,8 +135,6 @@ gpu_to_cpu<warp_size, size, T>::~gpu_to_cpu(){
 
     gpu(cudaFreeHost((void *) store));
 }
-
-
 
 template<size_t warp_size, size_t size, typename T>
 void gpu_to_cpu_host<warp_size, size, T>::catcher(){
@@ -154,6 +152,25 @@ void gpu_to_cpu_host<warp_size, size, T>::catcher(){
         flags[front] = 0;
         front = (front + 1) % size;
     }
+}
+
+
+template<size_t warp_size, size_t size, typename T>
+__host__ void gpu_to_cpu<warp_size, size, T>::before_open(){
+    decltype(this->teleporter_catcher_obj) p;
+    gpu(cudaMemcpy(&p, &(this->teleporter_catcher_obj), sizeof(decltype(this->teleporter_catcher_obj)), cudaMemcpyDefault));
+    p->parent->open();
+}
+
+template<size_t warp_size, size_t size, typename T>
+__host__ void gpu_to_cpu<warp_size, size, T>::after_close(){
+    decltype(this->teleporter_catcher_obj) p;
+    gpu(cudaMemcpy(&p, &(this->teleporter_catcher_obj), sizeof(decltype(this->teleporter_catcher_obj)), cudaMemcpyDefault));
+    
+    thread         *t;
+    gpu(cudaMemcpy(&t, &(this->teleporter_catcher)    , sizeof(decltype(this->teleporter_catcher))    , cudaMemcpyDefault));
+    t->join();
+    p->parent->close();
 }
 
 template class gpu_to_cpu<WARPSIZE, 64, buffer_t *>;

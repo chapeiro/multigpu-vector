@@ -16,13 +16,15 @@ private:
 public:
     __host__ aggregation(d_operator_t * parent, int32_t shared_offset, int grid_size = 0, int dev = 0);
 
-    __device__ void open();
+    __host__   void before_open();
+    __device__ void at_open();
 
     __device__ void consume_open();
     __device__ void consume_warp(const int32_t *src, unsigned int N);
     __device__ void consume_close();
 
-    __device__ void close();
+    __device__ void at_close();
+    __host__   void after_close();
 
     __host__ ~aggregation(){}
 };

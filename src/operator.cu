@@ -7,32 +7,12 @@
 #include "exchange.cuh"
 #include "select3.cuh"
 #include "gpu_to_cpu.cuh"
-
-// template<typename T>
-// __host__ __device__ void push::operator()(T op) const{
-//    op->consume(buff);
-// }
-
-// template<typename T>
-// __host__ __device__ void close::operator()(T op) const{
-//    op->join();
-// }
-
-
-// template __host__ __device__ void push::operator()<generator    *>(generator    * op) const;
-// template __host__ __device__ void push::operator()<materializer *>(materializer * op) const;
-// template __host__ __device__ void push::operator()<consumer     *>(consumer     * op) const;
-// template __host__ __device__ void push::operator()<producer     *>(producer     * op) const;
-
-// template __host__ __device__ void close::operator()<generator    *>(generator    * op) const;
-// template __host__ __device__ void close::operator()<materializer *>(materializer * op) const;
-// template __host__ __device__ void close::operator()<consumer     *>(consumer     * op) const;
-// template __host__ __device__ void close::operator()<producer     *>(producer     * op) const;
+#include "hashjoin.cuh"
 
 class open_op{
 public:
     template<typename T>
-    __host__ __device__ void operator()(T op) const{
+    __host__ void operator()(T op) const{
         op->open();
     }
 };
@@ -40,8 +20,40 @@ public:
 class close_op{
 public:
     template<typename T>
-    __host__ __device__ void operator()(T op) const{
+    __host__ void operator()(T op) const{
         op->close();
+    }
+};
+
+class before_open_op{
+public:
+    template<typename T>
+    __host__ void operator()(T op) const{
+        op->before_open();
+    }
+};
+
+class after_close_op{
+public:
+    template<typename T>
+    __host__ void operator()(T op) const{
+        op->after_close();
+    }
+};
+
+class at_open_op{
+public:
+    template<typename T>
+    __device__ void operator()(T op) const{
+        op->at_open();
+    }
+};
+
+class at_close_op{
+public:
+    template<typename T>
+    __device__ void operator()(T op) const{
+        op->at_close();
     }
 };
 
@@ -94,8 +106,29 @@ public:
     }
 };
 
-__device__ void d_operator_t::open(){
-    variant::apply_visitor(open_op{}, op);
+
+
+__global__ void launch_open_pipeline3(d_operator_t *op){
+    variant::apply_visitor(at_open_op{}, op->op);
+}
+
+
+__global__ void launch_close_pipeline3(d_operator_t *op){
+    variant::apply_visitor(at_close_op{}, op->op);
+}
+
+// __device__ void d_operator_t::open(){
+//     variant::apply_visitor(open_op{}, op);
+// }
+__host__ void d_operator_t::open(){
+    d_operator_t tmp;
+    gpu(cudaMemcpy(&tmp, this, sizeof(d_operator_t), cudaMemcpyDefault));
+
+    variant::apply_visitor(before_open_op{}, tmp.op);
+
+    set_device_on_scope d(tmp.conf.device);
+    launch_open_pipeline3<<<tmp.conf.gridDim, tmp.conf.blockDim, tmp.conf.shared_mem, 0>>>(this);
+    gpu(cudaDeviceSynchronize());
 }
 
 __device__ void d_operator_t::consume_open(){
@@ -110,12 +143,19 @@ __device__ void d_operator_t::consume_close(){
     variant::apply_visitor(push_close_op{}, op);
 }
 
-__device__ void d_operator_t::close(){
-    variant::apply_visitor(close_op{}, op);
+__host__ void d_operator_t::close(){
+    d_operator_t tmp;
+    gpu(cudaMemcpy(&tmp, this, sizeof(d_operator_t), cudaMemcpyDefault));
+
+    set_device_on_scope d(tmp.conf.device);
+    launch_close_pipeline3<<<tmp.conf.gridDim, tmp.conf.blockDim, tmp.conf.shared_mem, 0>>>(this);
+    gpu(cudaDeviceSynchronize());
+
+    variant::apply_visitor(after_close_op{}, tmp.op);
 }
 
 __host__ d_operator_t::~d_operator_t(){
-    variant::apply_visitor(delete_op{}, op);
+    // variant::apply_visitor(delete_op{}, op);
 }
 
 __host__ void h_operator_t::open(){
@@ -131,5 +171,5 @@ __host__ void h_operator_t::close(){
 }
 
 __host__ h_operator_t::~h_operator_t(){
-    variant::apply_visitor(delete_op{}, op);
+    // variant::apply_visitor(delete_op{}, op);
 }

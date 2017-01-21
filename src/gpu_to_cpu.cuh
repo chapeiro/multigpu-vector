@@ -8,6 +8,9 @@
 
 using namespace std;
 
+template<size_t warp_size, size_t size, typename T>
+class gpu_to_cpu;
+
 template<size_t warp_size = WARPSIZE, size_t size = 64, typename T = int32_t>
 class gpu_to_cpu_host{
 private:
@@ -18,13 +21,14 @@ private:
     size_t                                  front;
 
 private:
-public:
     void catcher();
 
 public:
     gpu_to_cpu_host(h_operator_t *parent, volatile T *store, volatile int *flags, volatile int *eof);
 
     ~gpu_to_cpu_host();
+
+    friend gpu_to_cpu<warp_size, size, T>;
 };
 
 template<size_t warp_size = WARPSIZE, size_t size = 64, typename T = int32_t>
@@ -45,13 +49,15 @@ private:
 public:
     __host__ gpu_to_cpu(h_operator_t * parent, int device);
 
-    __device__ void open();
+    __host__   void before_open();
+    __device__ void at_open();
 
     __device__ void consume_open();
     __device__ void consume_warp(const int32_t *x, unsigned int N);
     __device__ void consume_close();
 
-    __device__ void close();
+    __device__ void at_close();
+    __host__   void after_close();
 
     __host__ ~gpu_to_cpu();
 };

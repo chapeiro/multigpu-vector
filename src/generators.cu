@@ -44,26 +44,26 @@ __host__ generator::generator(h_operator_t * parent, int32_t *src, uint32_t N):
     // parent->close();
 }
 
-__host__ __device__ void generator::open(){}
+__host__ void generator::open(){
+    parent->open();
+}
 
-__host__ __device__ void generator::consume(buffer_pool<int32_t>::buffer_t * data){
+__host__ void generator::consume(buffer_pool<int32_t>::buffer_t * data){
     assert(false);
 }
 
-__host__ __device__ void generator::close(){
-#ifdef __CUDA_ARCH__
-    assert(false);
-#else
+__host__ void generator::close(){
     {
         buffer_pool<int32_t>::buffer_t::inspector_t insp(strm);
         auto start = chrono::system_clock::now();
         while (N > 0){
-            buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::get_buffer();
+            // buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::get_buffer();
+            buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(1);
 
             int m = min(N, buffer_pool<int32_t>::buffer_t::capacity());
 
             insp.load(buff, true);
-            insp.overwrite(src, m);
+            insp.overwrite(src, m, false);
 
             insp.save(buff, true);
 
@@ -78,11 +78,10 @@ __host__ __device__ void generator::close(){
     {
         auto start = chrono::system_clock::now();
         gpu(cudaStreamSynchronize(strm));
-        // parent->close();
         auto end   = chrono::system_clock::now();
-        cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
+        cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms." << endl;
     }
-#endif
+    parent->close();
 }
 
 __host__ generator::~generator(){

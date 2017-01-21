@@ -22,24 +22,24 @@ __device__ void unstable_select<warp_size, T>::consume_warp(const int32_t *src, 
 
     const int32_t warpid            = get_warpid();
     const int32_t laneid            = get_laneid();
-    const int32_t width             = blockDim.x * blockDim.y;
+    // const int32_t width             = blockDim.x * blockDim.y;
 
     const int32_t prevwrapmask      = (1 << laneid) - 1;
 
     // volatile int32_t *fcount      = (int32_t *) s;
     // volatile int32_t *wrapoutbase = (int32_t *) (s + (width + warpSize - 1) / warpSize);
     volatile int32_t *wrapoutbase   = ((int32_t *) s);
-    volatile int32_t *fcount        = ((int32_t *) s) + 5 * warpSize * (((width + warpSize - 1) / warpSize) + 1);
-    volatile int32_t *wrapoutput    = wrapoutbase + 5 * warpSize * warpid;
+    // volatile int32_t *fcount        = ((int32_t *) s) + 5 * warp_size * (((width + warp_size - 1) / warp_size) + 1);
+    volatile int32_t *wrapoutput    = wrapoutbase + 5 * warp_size * warpid;
 
-    int32_t filterout = fcount[warpid];
+    int32_t filterout = wrapoutput[5*warp_size - 1];
 
     #pragma unroll
     for (int k = 0 ; k < 4 ; ++k){
         bool predicate = false;
         if (k*warpSize + laneid < N){
             //compute predicate
-            predicate = src[k*warpSize + laneid] <= 50;
+            predicate = src[k*warpSize + laneid] <= 5000;
         }
 
         //aggregate predicate results
@@ -70,7 +70,7 @@ __device__ void unstable_select<warp_size, T>::consume_warp(const int32_t *src, 
         // __syncthreads(); //FIXME: this should not be needed, but racecheck produces errors without it
     }
 
-    if (laneid == 0) fcount[warpid] = filterout;
+    if (laneid == 0) wrapoutput[5*warp_size - 1] = filterout;
 }
 
 template<size_t warp_size, typename T>
@@ -79,27 +79,28 @@ __device__ void unstable_select<warp_size, T>::consume_close(){
 
     const int32_t warpid            = get_warpid();
     const int32_t laneid            = get_laneid();
-    const int32_t width             = blockDim.x * blockDim.y;
+    // const int32_t width             = blockDim.x * blockDim.y;
 
     const int32_t gridwidth         = gridDim.x     * gridDim.y ;
 
     // volatile int32_t *fcount      = (int32_t *) s;
     // volatile int32_t *wrapoutbase = (int32_t *) (s + (width + warpSize - 1) / warpSize);
     volatile int32_t *wrapoutbase = ((int32_t *) s);
-    volatile int32_t *fcount      = ((int32_t *) s) + 5 * warpSize * (((width + warpSize - 1) / warpSize) + 1);
-    volatile int32_t *wrapoutput  = wrapoutbase + 5 * warpSize * warpid;
+    volatile int32_t *wrapoutput  = wrapoutbase + 5 * warp_size * warpid;
+    volatile int32_t *fcount      = wrapoutput  + 5 * warp_size - 1;
 
-    int32_t filterout = fcount[warpid];
+    int32_t filterout = *fcount;
 
     for (int32_t m = 1 ; m <= 5 ; ++m){ //fixme: not until 5, but until ceil(log(max warpid)) ? also ceil on target_filter_out condition
         int32_t mask = (1 << m) - 1;
 
         if (!(warpid & mask)){
             int32_t target_wrapid               = warpid + (1 << (m - 1));
-            int32_t target_filter_out           = (target_wrapid < blockDim.x * blockDim.y/warpSize) ? fcount[target_wrapid] : 0;
-            int32_t target_filter_out_rem       = target_filter_out;
-
+            
             volatile int32_t *target_wrapoutput = wrapoutbase + 5 * warpSize * target_wrapid;
+
+            int32_t target_filter_out           = (target_wrapid < blockDim.x * blockDim.y/warpSize) ? target_wrapoutput[5*warp_size - 1] : 0;
+            int32_t target_filter_out_rem       = target_filter_out;
 
             for (int32_t k = 0; k < (target_filter_out + warpSize - 1)/warpSize ; ++k){
                 assert(k < 4);
@@ -121,7 +122,7 @@ __device__ void unstable_select<warp_size, T>::consume_close(){
             }
 
             //no __syncthreads is needed here due to the pattern of accesses on fcount
-            if (laneid == 0) fcount[warpid] = filterout;
+            if (laneid == 0) *fcount = filterout;
         }
         __syncthreads();
     }
@@ -218,18 +219,20 @@ __device__ void unstable_select<warp_size, T>::consume_open(){
 
     const int32_t laneid     = get_laneid();
     const int32_t warpid     = get_warpid();
-    const int32_t width      = blockDim.x * blockDim.y;
+    // const int32_t width      = blockDim.x * blockDim.y;
 
-    volatile int32_t *fcount = ((int32_t *) s) + 5 * warpSize * (((width + warpSize - 1) / warpSize) + 1);
+    volatile int32_t *wrapoutbase   = ((int32_t *) s);
+    volatile int32_t *wrapoutput    = wrapoutbase + 5 * warp_size * warpid;
+    volatile int32_t *fcount        = wrapoutput  + 5 * warp_size - 1;
 
-    if (laneid == 0) fcount[warpid] = 0;
+    if (laneid == 0) *fcount = 0;
 }
 
 template<size_t warp_size, typename T>
-__device__ void unstable_select<warp_size, T>::open(){}
+__device__ void unstable_select<warp_size, T>::at_open(){}
 
 template<size_t warp_size, typename T>
-__device__ void unstable_select<warp_size, T>::close(){
+__device__ void unstable_select<warp_size, T>::at_close(){
     if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0){
         const uint32_t laneid = get_laneid();
 
@@ -243,6 +246,20 @@ __device__ void unstable_select<warp_size, T>::close(){
 
         parent->consume_close();
     }
+}
+
+template<size_t warp_size, typename T>
+__host__ void unstable_select<warp_size, T>::before_open(){
+    decltype(this->parent) p;
+    gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
+    p->open();
+}
+
+template<size_t warp_size, typename T>
+__host__ void unstable_select<warp_size, T>::after_close(){
+    decltype(this->parent) p;
+    gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
+    p->close();
 }
 
 template class unstable_select<>;
