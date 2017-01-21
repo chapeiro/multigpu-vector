@@ -1,7 +1,7 @@
 #ifndef MATERIALIZER_CUH_
 #define MATERIALIZER_CUH_
 
-#include "buffer_pool.cuh"
+#include "../buffer_pool.cuh"
 #include <vector>
 #include <chrono>
 #include <deque>

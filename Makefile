@@ -74,8 +74,8 @@ EXCLUDE_SOURCES+= src/main4.cu
 EXCLUDE_SOURCES+= src/main5.cu
 EXCLUDE_SOURCES+= src/main6.cu
 EXCLUDE_SOURCES+= src/output_composer.cu
-EXCLUDE_SOURCES+= src/select.cu
-EXCLUDE_SOURCES+= src/select2.cu
+EXCLUDE_SOURCES+= src/operators/select.cu
+EXCLUDE_SOURCES+= src/operators/select2.cu
 
 CXX_SOURCESD= $(shell find $(SRC_ROOT) -name "*.cu")
 CXX_SOURCESD:= $(filter-out $(EXCLUDE_SOURCES),$(CXX_SOURCESD))

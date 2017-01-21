@@ -1,5 +1,5 @@
 #include "materializer.cuh"
-#include "buffer_manager.cuh"
+#include "../buffer_manager.cuh"
 
 __host__ materializer::materializer(int32_t * dst): dst(dst), size(0), ms(0){//, out(&out){
     gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));

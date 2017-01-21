@@ -64,7 +64,8 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_warp(const vec4 
         filterout += newpop;
 
         if (filterout >= 4*warpSize){
-            output.push(wrapoutput);
+            // output.push(wrapoutput);
+            parent->consume_warp(wrapoutput, 4);
 
             wrapoutput[laneid]             = wrapoutput[laneid + 4*warpSize];
             filterout                     -= 4*warpSize;
@@ -169,12 +170,16 @@ __host__ __device__ void unstable_select<warp_size, T>::consume_close(){
 
         if (totcnt0 >= 4*warpSize){
             assert(totcnt0 <= 4*warpSize);
-            output.push(buffer+bnum0*(4*warpSize));
+            // output.push(buffer+bnum0*(4*warpSize));
+            parent->consume_warp(buffer+bnum0*(4*warpSize), 4);
+
             if (laneid == 0) cnts[bnum0] = 0; //clean up for next round
         }
         if (totcnt1 >= 4*warpSize){
             assert(totcnt1 <= 4*warpSize);
-            output.push(buffer+bnum1*(4*warpSize));
+            // output.push(buffer+bnum1*(4*warpSize));
+            parent->consume_warp(buffer+bnum1*(4*warpSize), 4);
+
             if (laneid == 0) cnts[bnum1] = 0; //clean up for next round
         }
     }
@@ -422,11 +427,39 @@ __host__ __device__ void unstable_select<warp_size, T>::consume2(buffer_pool<int
 #endif
 }
 
+// template<size_t warp_size, typename T>
+// __host__ __device__ void unstable_select<warp_size, T>::join(){
+//     output.push_flush(buffer, buffer_size);
+
+//     parent->close();
+// }
+
 template<size_t warp_size, typename T>
 __host__ __device__ void unstable_select<warp_size, T>::join(){
-    output.push_flush(buffer, buffer_size);
+    // output.push_flush(buffer, buffer_size);
 
-    parent->close();
+    const int32_t blocki  = blockIdx.x  +  blockIdx.y *  gridDim.x;
+    const int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
+    const int32_t warpid  = i / warpSize;
+
+    bool ellig = (blocki == 0) && (warpid == 0);
+
+    uint32_t laneid = get_laneid();
+
+    if (ellig){
+        parent->consume_open();
+        
+        vec4 tmp;
+        #pragma unroll
+        for (int k = 0 ; k < 4 ; ++k) tmp.i[k] = buffer[k*warpSize + laneid];// = buffstart[k*warpSize + laneid];
+
+        parent->consume_warp(tmp, (buffer_size - laneid + warpSize - 1) / warpSize);
+    }
+
+    __syncthreads();
+
+    if (ellig) parent->consume_close();
+    // parent->close();
 }
 
 template class unstable_select<>;

@@ -1,4 +1,4 @@
-#include "common.cuh"
+#include "../common.cuh"
 #include "hashjoin.cuh"
 
 __device__ uint32_t hashMurmur(uint32_t x){

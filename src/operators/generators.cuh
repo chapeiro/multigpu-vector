@@ -1,7 +1,7 @@
 #ifndef DATA_GENERATORS_CUH_
 #define DATA_GENERATORS_CUH_
 
-#include "buffer_pool.cuh"
+#include "../buffer_pool.cuh"
 #include "operator.cuh"
 #include <vector>
 

@@ -1,7 +1,6 @@
 #ifndef SELECT3_CUH_
 #define SELECT3_CUH_
 
-#include "buffer_pool.cuh"
 #include "operator.cuh"
 #include <vector>
 // #include "output_composer.cuh"

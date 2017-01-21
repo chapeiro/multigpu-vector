@@ -7,7 +7,7 @@
 #include <mutex>
 #include <condition_variable>
 #include "operator.cuh"
-#include "buffer_pool.cuh"
+#include "../buffer_pool.cuh"
 
 // typedef void (Operator::*con)(buffer_pool<int32_t>::buffer_t *);
 

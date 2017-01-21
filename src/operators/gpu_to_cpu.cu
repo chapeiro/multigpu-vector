@@ -1,6 +1,6 @@
 #include "gpu_to_cpu.cuh"
-#include "common.cuh"
-#include "buffer_manager.cuh"
+#include "../common.cuh"
+#include "../buffer_manager.cuh"
 
 template<size_t warp_size, size_t size, typename T>
 gpu_to_cpu<warp_size, size, T>::gpu_to_cpu(h_operator_t * parent, int device): 

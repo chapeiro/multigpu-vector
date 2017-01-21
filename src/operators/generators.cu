@@ -1,5 +1,5 @@
 #include "generators.cuh"
-#include "buffer_manager.cuh"
+#include "../buffer_manager.cuh"
 
 #include <iostream>
 #include <chrono>

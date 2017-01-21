@@ -1,7 +1,7 @@
 #include "exchange.cuh"
 #include <iostream>
-#include "common.cuh"
-#include "buffer_manager.cuh"
+#include "../common.cuh"
+#include "../buffer_manager.cuh"
 #include "operator.cuh"
 
 using namespace std;

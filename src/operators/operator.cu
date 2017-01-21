@@ -1,5 +1,4 @@
 #include "operator.cuh"
-#include "buffer_pool.cuh"
 
 #include "aggregation.cuh"
 #include "generators.cuh"

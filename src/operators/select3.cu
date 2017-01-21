@@ -1,5 +1,4 @@
 #include "select3.cuh"
-#include "buffer_manager.cuh"
 
 using namespace std;
 

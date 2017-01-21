@@ -1,8 +1,8 @@
 #ifndef OPERATOR_CUH_
 #define OPERATOR_CUH_
 
-#include "../external/variant/variant/variant.h"
-#include "buffer_pool.cuh"
+#include "../../external/variant/variant/variant.h"
+#include "../buffer_pool.cuh"
 
 using namespace std;
 

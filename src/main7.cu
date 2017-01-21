@@ -13,16 +13,16 @@
 #include <cuda_profiler_api.h>
 #include <chrono>
 
-#include "exchange.cuh"
-#include "materializer.cuh"
-#include "generators.cuh"
-#include "aggregation.cuh"
+#include "operators/exchange.cuh"
+#include "operators/materializer.cuh"
+#include "operators/generators.cuh"
+#include "operators/aggregation.cuh"
 
-#include "gpu_to_cpu.cuh"
+#include "operators/gpu_to_cpu.cuh"
 // #include <functional>
 
-#include "select3.cuh"
-#include "hashjoin.cuh"
+#include "operators/select3.cuh"
+#include "operators/hashjoin.cuh"
 
 // #include <nvToolsExt.h>
 
