@@ -161,7 +161,6 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
         // execs.emplace_back([buff_l, this](){
         //parent is running on device
         set_device_on_scope d(device);
-
         //move buffer
         if (true){//rand() & 1){
             // cudaEvent_t event;

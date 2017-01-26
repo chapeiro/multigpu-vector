@@ -60,8 +60,6 @@ __device__ void split<warp_size, T>::consume_warp(const T * src, unsigned int N)
     const int32_t prevwrapmask      = (1 << laneid) - 1;
 
     const uint32_t warp_global_index = get_global_warpid();
-    if (laneid == 0 && warp_global_index >= 512) printf("%d\n", warp_global_index);
-    if (laneid == 0) assert(warp_global_index < 512);
 
     #pragma unroll
     for (int k = 0 ; k < 4 ; ++k){

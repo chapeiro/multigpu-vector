@@ -38,8 +38,10 @@ using namespace std;
 #endif
 
 int N = NVAL;
+int M = NVAL;
 
 int32_t *a;
+int32_t *s;
 int32_t *b;
 int32_t *c;
 
@@ -244,8 +246,8 @@ pair<vector<generator *>, materializer *> create_count_join_select_pipeline(int3
     h_operator_t * xroot                                                        = h_operator_t::create<     exchange            >(xparent, xconf);
     h_operator_t * xroot_pre                                                    = h_operator_t::create<     union_all_cpu       >(xroot  , 2);
 
-    launch_conf conf0hj{dim3(32), dim3(1024), 0, 0};
-    launch_conf conf1hj{dim3(32), dim3(1024), 0, 1};
+    launch_conf conf0hj{dim3(128), dim3(1024), 0, 0};
+    launch_conf conf1hj{dim3(128), dim3(1024), 0, 1};
 
     d_operator_t * xg2c0                                                        = d_operator_t::create<     gpu_to_cpu<>        >(conf0hj, xroot_pre, conf0hj.device);
     d_operator_t * xg2c1                                                        = d_operator_t::create<     gpu_to_cpu<>        >(conf1hj, xroot_pre, conf1hj.device);
@@ -309,8 +311,8 @@ pair<vector<generator *>, materializer *> create_count_join_1G_pipeline(int32_t 
 
     h_operator_t * xroot                                                        = h_operator_t::create<     exchange            >(xparent, xconf);
     
-    launch_conf conf0hj{dim3(16), dim3(1024), 0, 0};
-    launch_conf conf1hj{dim3(16), dim3(1024), 0, 1};
+    launch_conf conf0hj{dim3(128), dim3(1024), 0, 0};
+    launch_conf conf1hj{dim3(128), dim3(1024), 0, 1};
 
     d_operator_t * xg2c0                                                        = d_operator_t::create<     gpu_to_cpu<>        >(conf0hj, xroot, conf0hj.device);
 
@@ -344,7 +346,7 @@ pair<vector<generator *>, materializer *> create_count_join_1G_pipeline(int32_t 
 
 int parse_args(int argc, char *argv[]){
     int c;
-    while ((c = getopt (argc, argv, "N:")) != -1){
+    while ((c = getopt (argc, argv, "N:M:")) != -1){
         switch (c){
             case 'N':
                 {
@@ -382,6 +384,42 @@ int parse_args(int argc, char *argv[]){
                     N = val;
                     break;
                 }
+            case 'M':
+                {
+                    char * tmp   = optarg;
+                    char * start = optarg;
+                    int val = 1;
+                    while (*tmp){
+                        char t = *tmp;
+                        if (t >= '0' && t <= '9'){
+                            ++tmp;
+                            continue;
+                        } else {
+                            *tmp = 0;
+                            val *= atoi(start);
+                            *tmp = t;
+                            start = tmp + 1;
+
+                            ++tmp;
+                            if (t == '*') continue;
+
+                            if      (t == 'K') val *= 1024;
+                            else if (t == 'M') val *= 1024*1024;
+                            else if (t == 'G') val *= 1024*1024*1024;
+                            else {
+                                cout << "Invalid entry for option -M: " << optarg << endl;
+                                return -2;
+                            }
+                            if (*tmp) {
+                                cout << "Invalid entry for option -M: " << optarg << endl;
+                                return -3;
+                            }
+                            break;
+                        }
+                    }
+                    M = val;
+                    break;
+                }
             case '?':
                 if (optopt == 'N')
                     fprintf (stderr, "Option -%c requires an argument.\n", optopt);
@@ -402,7 +440,7 @@ int parse_args(int argc, char *argv[]){
 int main(int argc, char *argv[]){
     int tmp = parse_args(argc, argv);
     if (tmp) return tmp;
-
+    cout << N << " " << M << endl;
     setbuf(stdout, NULL);
     // gpu(cudaSetDeviceFlags(cudaDeviceScheduleYield));
     srand(time(0));
@@ -413,6 +451,7 @@ int main(int argc, char *argv[]){
     // a = (int32_t*) malloc(N*sizeof(int32_t));
 
     gpu(cudaMallocHost(&a, N*sizeof(int32_t)));
+    gpu(cudaMallocHost(&s, M*sizeof(int32_t)));
 
     b = (int32_t*) malloc(N*sizeof(int32_t));
     c = (int32_t*) malloc(N*sizeof(int32_t));
@@ -420,7 +459,8 @@ int main(int argc, char *argv[]){
     
     // nvtxMarkA("Start");
 
-    for (int i = 0 ; i < N ; ++i) a[i] = rand() % 10000 + 1;
+    for (int i = 0 ; i < N ; ++i) a[i] = rand() % min(N, M) + 1;
+    for (int i = 0 ; i < M ; ++i) s[i] = rand() % min(N, M) + 1;
 
 {
     set_device_on_scope d(0);
@@ -442,12 +482,12 @@ int main(int argc, char *argv[]){
     int32_t *dst;
     gpu(cudaMallocHost(&dst, sizeof(int32_t)*N));
 
-    launch_conf conf0{dim3(16), dim3(1024), 40960, 0};
-    launch_conf conf1{dim3(16), dim3(1024), 40960, 1};
+    launch_conf conf0{dim3(128), dim3(1024), 40960, 0};
+    launch_conf conf1{dim3(128), dim3(1024), 40960, 1};
     vector<launch_conf> confs{conf0, conf1};
     
     // pair<vector<generator *>, materializer *> p = create_sum_select_pipeline(dst, a, N, confs);
-    pair<vector<generator *>, materializer *> p = create_count_join_select_pipeline(dst, a, N, a, N, confs);
+    pair<vector<generator *>, materializer *> p = create_count_join_select_pipeline(dst, a, N, s, M, confs);
 
     materializer * omat = p.second;
 
@@ -463,6 +503,7 @@ int main(int argc, char *argv[]){
 
         auto end   = chrono::system_clock::now();
         cout << "Tm: " << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
+        // cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
     }
     auto end   = chrono::system_clock::now();
     // nvtxMarkA("End");
@@ -475,40 +516,40 @@ int main(int argc, char *argv[]){
 
     cout << results.size() << endl;
 
-    size_t M;
-    {
-        auto start = chrono::system_clock::now();
-        // M = stable_select_cpu(a, c, N);
-        // M = sum_select_cpu(a, c, N);
-        // M = sum_selfjoin_select_cpu(a, c, N);
-        M = sum_hashjoin_select_cpu(a, c, a, d, N, N);
-        auto end   = chrono::system_clock::now();
-        cout << "CPU: " << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
-    }
+//     size_t M;
+//     {
+//         auto start = chrono::system_clock::now();
+//         // M = stable_select_cpu(a, c, N);
+//         // M = sum_select_cpu(a, c, N);
+//         // M = sum_selfjoin_select_cpu(a, c, N);
+//         M = sum_hashjoin_select_cpu(a, c, a, d, N, N);
+//         auto end   = chrono::system_clock::now();
+//         cout << "CPU: " << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
+//     }
     
-    cout << results[0] + results[1] << ((results[0] == c[0]) ? " = " : " ! ") << c[0] << endl;
-    if (results.size() != M){
-        cout << "Wrong output size! " << results.size() << " vs " << M << endl;
-        // assert(false);
-        return -1;
-        // return 0;
-    }
-//     // return 0;
-#ifndef __CUDA_ARCH__
-    sort(c, c + M);
-    sort(results.begin(), results.end());
+//     cout << results[0] + results[1] << ((results[0] == c[0]) ? " = " : " ! ") << c[0] << endl;
+//     if (results.size() != M){
+//         cout << "Wrong output size! " << results.size() << " vs " << M << endl;
+//         // assert(false);
+//         return -1;
+//         // return 0;
+//     }
+// //     // return 0;
+// #ifndef __CUDA_ARCH__
+//     sort(c, c + M);
+//     sort(results.begin(), results.end());
 
-    bool failed = false;
-    for (int i = 0 ; i < M ; ++i){
-        if (c[i] != results[i]){
-            cout << "Wrong result " << results[i] << " vs " << c[i] << " at (sorted) " << i << endl;
-            failed = true;
-        }
-    }
-    // assert(!failed);
-    if (failed) return -1;
-    cout << "End of Test" << endl;
-#endif
+//     bool failed = false;
+//     for (int i = 0 ; i < M ; ++i){
+//         if (c[i] != results[i]){
+//             cout << "Wrong result " << results[i] << " vs " << c[i] << " at (sorted) " << i << endl;
+//             failed = true;
+//         }
+//     }
+//     // assert(!failed);
+//     if (failed) return -1;
+//     cout << "End of Test" << endl;
+// #endif
 
     return 0;
 }

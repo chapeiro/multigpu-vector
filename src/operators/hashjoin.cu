@@ -51,9 +51,10 @@ __device__ void hashjoin_builder<warp_size>::consume_warp(const int32_t *src, un
         if (ind < N) {
             uint32_t bucket      = hashMurmur(src[ind]) & ((1 << log_table_size) - 1);
 
-            next  [offset + ind] = atomicExch(first + bucket, offset + ind);
+            next  [((offset + ind) << 1)  ] = atomicExch(first + bucket, offset + ind);
+            next  [((offset + ind) << 1)+1] = src[ind];
 
-            values[offset + ind] = src[ind];
+            // values[offset + ind] = src[ind];
         }
     }
 }
@@ -64,8 +65,8 @@ __host__ hashjoin<warp_size>::hashjoin(d_operator_t * parent, int32_t log_table_
     set_device_on_scope d(conf.device);
 
     gpu(cudaMalloc(&first , (1 << log_table_size) * sizeof(int32_t)));
-    gpu(cudaMalloc(&next  ,             max_size  * sizeof(int32_t)));
-    gpu(cudaMalloc(&values,             max_size  * sizeof(int32_t)));
+    gpu(cudaMalloc(&next  ,            2 * max_size  * sizeof(int32_t)));
+    // gpu(cudaMalloc(&values,             max_size  * sizeof(int32_t)));
 
     //carefull, this works because all bytes of -1 are the same
     gpu(cudaMemset(first, -1, (1 << log_table_size) * sizeof(int32_t)));
@@ -104,6 +105,8 @@ __device__ void hashjoin<warp_size>::consume_close(){}
 // __device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned int N){
 //     const int32_t laneid = get_laneid();
 
+//     int32_t r = 0;
+
 //     #pragma unroll
 //     for (int k = 0 ; k < 4 ; ++k){
 //         const uint32_t ind = k*warp_size + laneid;
@@ -116,11 +119,16 @@ __device__ void hashjoin<warp_size>::consume_close(){}
 
 //             current = first[bucket];
 //             while (current >= 0){
-//                 if (values[current] == probe) atomicAdd(&res, 1);
-//                 current = next[current];
+//                 if (next[(current << 1) + 1] == probe) ++r;//atomicAdd(&res, 1);
+//                 // ++r;
+//                 current = next[(current << 1) + 0];
+//                 // if (values[current] == probe) ++r;
+//                 // current = next[current];
 //             }
 //         }
 //     }
+
+//     atomicAdd(&res, r);
 // }
 
 template<size_t warp_size>
@@ -129,6 +137,7 @@ __device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned i
 
     vec4 x;
     vec4 curr;
+    int32_t r = 0;
 
     #pragma unroll
     for (int k = 0 ; k < 4 ; ++k) x.i[k]    = src[k * warp_size + laneid];
@@ -140,12 +149,18 @@ __device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned i
         #pragma unroll
         for (int k = 0 ; k < 4 ; ++k){
             if (curr.i[k] >= 0){
-                if (values[curr.i[k]] == x.i[k]) atomicAdd(&res, 1);
-                curr.i[k] = next[curr.i[k]];
+                int32_t t = curr.i[k] << 1;
+                int32_t n = next[t];
+
+                r        += next[t + 1] == x.i[k];
+                curr.i[k] = n;
+                // if (next[(curr.i[k] << 1) + 1] == x.i[k]) ++r;//atomicAdd(&res, 1);
+                // // ++r;
+                // curr.i[k] = next[curr.i[k] << 1];// == x.i[k];
             }
         }
     }
-    
+    atomicAdd(&res, r);
 
     // #pragma unroll
     // for (int k = 0 ; k < 4 ; ++k){
