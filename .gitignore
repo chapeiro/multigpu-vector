@@ -5,3 +5,4 @@ test3/
 teststre/
 sftp-config.json
 /.cuda-gdbinit
+cpu/

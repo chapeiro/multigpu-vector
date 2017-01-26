@@ -62,6 +62,7 @@ __host__ void exchange::fire(consumer *cons){
 
         if (!p) break;
 
+        this_thread::yield();
         cons->consume(p);
     } while (true);
         auto end   = chrono::system_clock::now();
@@ -120,7 +121,7 @@ __host__ __device__ void producer::consume(buffer_pool_t::buffer_t * buff){
 }
 
 
-__global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t * op, consumer::buffer_t * buff){
+__global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t * op, consumer::buffer_t * buff, consumer::buffer_t * prev_buff = NULL){
     // op->consume(buff);
     // variant::apply_visitor(push(buff), *op);
 
@@ -132,6 +133,8 @@ __global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t
     const int32_t blocki  = blockIdx.x + blockIdx.y * gridDim.x;
 
     const uint32_t N   = min(buff->cnt, buff->capacity());//insp->count();
+
+    if (blocki == 0 && threadIdx.x == 0 &&  threadIdx.y == 0 && threadIdx.z == 0 && prev_buff) buffer_manager<int32_t>::release_buffer(prev_buff);
 
     if (4 * blocki * width < N){
         const int32_t warpoff = 4*(get_warpid() * warpSize + blocki * width);
@@ -160,10 +163,10 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
         set_device_on_scope d(device);
 
         //move buffer
-        if (false){//rand() & 1){
-            cudaEvent_t event;
+        if (true){//rand() & 1){
+            // cudaEvent_t event;
 
-            gpu(cudaEventCreate(&event));
+            // gpu(cudaEventCreate(&event));
 
             buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(device);
 
@@ -174,18 +177,21 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
             to.load(buff, true);
             
             to.overwrite(from.data(), from.count(), false);
+            // to.overwrite(buff_l)
 
-            to.save(buff, false);
+            to.save(buff, true);
 
             buff_l = buff;
 
-            gpu(cudaEventRecord(event, strm2));
+            // gpu(cudaEventRecord(event, strm2));
 
-            gpu(cudaStreamWaitEvent(strm, event, 0));
+            // gpu(cudaStreamWaitEvent(strm, event, 0));
 
-            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff_l);
+            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff_l, prev_buff);
+            prev_buff = buff_l;
         } else {
-            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff_l);
+            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff_l, prev_buff);
+            prev_buff = buff_l;
         }
 
         //launch on buffer
@@ -200,7 +206,7 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
     }
 }
 
-__host__ consumer::consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, int shared_mem): parent(parent), dimGrid(dimGrid), dimBlock(dimBlock), shared_mem(shared_mem){
+__host__ consumer::consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, int shared_mem): parent(parent), dimGrid(dimGrid), dimBlock(dimBlock), shared_mem(shared_mem), prev_buff(NULL){
     assert(parent.h);
 
     device = get_device(parent.h);

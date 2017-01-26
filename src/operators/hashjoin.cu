@@ -100,27 +100,70 @@ __device__ void hashjoin<warp_size>::consume_open(){}
 template<size_t warp_size>
 __device__ void hashjoin<warp_size>::consume_close(){}
 
+// template<size_t warp_size>
+// __device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned int N){
+//     const int32_t laneid = get_laneid();
+
+//     #pragma unroll
+//     for (int k = 0 ; k < 4 ; ++k){
+//         const uint32_t ind = k*warp_size + laneid;
+//         int32_t current = -1;
+//         int32_t probe;
+//         uint32_t bucket;
+//         if (ind < N) {
+//             probe   = src[ind];
+//             bucket  = hashMurmur(probe) & ((1 << log_table_size) - 1);
+
+//             current = first[bucket];
+//             while (current >= 0){
+//                 if (values[current] == probe) atomicAdd(&res, 1);
+//                 current = next[current];
+//             }
+//         }
+//     }
+// }
+
 template<size_t warp_size>
 __device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned int N){
     const int32_t laneid = get_laneid();
 
-    #pragma unroll
-    for (int k = 0 ; k < 4 ; ++k){
-        const uint32_t ind = k*warp_size + laneid;
-        int32_t current = -1;
-        int32_t probe;
-        uint32_t bucket;
-        if (ind < N) {
-            probe   = src[ind];
-            bucket  = hashMurmur(probe) & ((1 << log_table_size) - 1);
+    vec4 x;
+    vec4 curr;
 
-            current = first[bucket];
-            while (current >= 0){
-                if (values[current] == probe) atomicAdd(&res, 1);
-                current = next[current];
+    #pragma unroll
+    for (int k = 0 ; k < 4 ; ++k) x.i[k]    = src[k * warp_size + laneid];
+
+    #pragma unroll
+    for (int k = 0 ; k < 4 ; ++k) curr.i[k] = (k*warp_size + laneid < N) ? first[hashMurmur(x.i[k]) & ((1 << log_table_size) - 1)] : -1;
+
+    while (curr.i[0] >= 0 || curr.i[1] >= 0 || curr.i[2] >= 0 || curr.i[3] >= 0){
+        #pragma unroll
+        for (int k = 0 ; k < 4 ; ++k){
+            if (curr.i[k] >= 0){
+                if (values[curr.i[k]] == x.i[k]) atomicAdd(&res, 1);
+                curr.i[k] = next[curr.i[k]];
             }
         }
     }
+    
+
+    // #pragma unroll
+    // for (int k = 0 ; k < 4 ; ++k){
+    //     const uint32_t ind = k*warp_size + laneid;
+    //     int32_t current = -1;
+    //     int32_t probe;
+    //     uint32_t bucket;
+    //     if (ind < N) {
+    //         probe   = src[ind];
+    //         bucket  = hashMurmur(probe) & ((1 << log_table_size) - 1);
+
+    //         current = first[bucket];
+    //         while (current >= 0){
+    //             if (values[current] == probe) atomicAdd(&res, 1);
+    //             current = next[current];
+    //         }
+    //     }
+    // }
 }
 
 template<size_t warp_size>

@@ -8,11 +8,12 @@ using namespace std;
 
 class generator;
 class materializer;
+class union_all_cpu;
 class exchange;
 class producer;
 template<size_t warp_size, int32_t neutral_value>
 class aggregation;
-template<size_t warp_size, typename T>
+template<size_t warp_size, typename... T>
 class unstable_select;
 template<size_t warp_size, size_t size, typename T>
 class gpu_to_cpu;
@@ -20,6 +21,10 @@ template<size_t warp_size>
 class hashjoin_builder;
 template<size_t warp_size>
 class hashjoin;
+template<size_t warp_size, typename T>
+class split;
+template<size_t warp_size, typename T>
+class union_all;
 
 typedef buffer_pool<int32_t> buffer_pool_t;
 
@@ -34,7 +39,7 @@ typedef buffer_pool_t::buffer_t buffer_t;
 
 class d_operator_t{
 public:
-    typedef variant::variant<unstable_select<32, int32_t> *, gpu_to_cpu<32, 64, buffer_t *> *, aggregation<32, 0> *, hashjoin_builder<32> *, hashjoin<32> *> op_t;
+    typedef variant::variant<split<32, int32_t> *, union_all<32, int32_t> *, unstable_select<32, int32_t> *, gpu_to_cpu<32, 64, buffer_t *> *, aggregation<32, 0> *, hashjoin_builder<32> *, hashjoin<32> *> op_t;
     op_t        op;
     launch_conf conf;
 
@@ -80,7 +85,7 @@ public:
 
 class h_operator_t{
 private:
-    typedef variant::variant<generator *, materializer *, producer *, exchange *> op_t;
+    typedef variant::variant<union_all_cpu *, generator *, materializer *, producer *, exchange *> op_t;
     op_t op;
 
     template<typename Op, typename... Args>

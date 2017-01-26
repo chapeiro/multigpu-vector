@@ -7,6 +7,9 @@
 #include "select3.cuh"
 #include "gpu_to_cpu.cuh"
 #include "hashjoin.cuh"
+#include "split.cuh"
+#include "union_all.cuh"
+#include "union_all_cpu.cuh"
 
 class open_op{
 public:
@@ -135,6 +138,7 @@ __device__ void d_operator_t::consume_open(){
 }
 
 __device__ void d_operator_t::consume_warp(const int32_t *x, unsigned int N){
+    assert(N <= 4*WARPSIZE);
     variant::apply_visitor(push_warp_op{x, N}, op);
 }
 

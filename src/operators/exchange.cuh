@@ -48,6 +48,7 @@ private:
     dim3            dimBlock;
     p_operator_t    parent;
     vector<thread>  execs;
+    buffer_t      * prev_buff;
     
 public:
     __host__ consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, int shared_mem);

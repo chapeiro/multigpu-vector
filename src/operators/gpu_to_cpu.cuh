@@ -11,7 +11,7 @@ using namespace std;
 template<size_t warp_size, size_t size, typename T>
 class gpu_to_cpu;
 
-template<size_t warp_size = WARPSIZE, size_t size = 64, typename T = int32_t>
+template<size_t warp_size = WARPSIZE, size_t size = 64, typename T = buffer_t *>
 class gpu_to_cpu_host{
 private:
     h_operator_t                           *parent;
@@ -31,7 +31,7 @@ public:
     friend gpu_to_cpu<warp_size, size, T>;
 };
 
-template<size_t warp_size = WARPSIZE, size_t size = 64, typename T = int32_t>
+template<size_t warp_size = WARPSIZE, size_t size = 64, typename T = buffer_t *>
 class gpu_to_cpu{
 private:
     volatile int    lock;

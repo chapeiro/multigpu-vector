@@ -78,7 +78,7 @@ __device__ void gpu_to_cpu<warp_size, size, T>::consume_warp(const int32_t *src,
         // output.push_flush(x, N);
         buffer_t * outbuff = (buffer_t *) output_buffer;
 
-        if (laneid == 0) printf("========================%d %d\n", outbuff->count(), N);
+        // if (laneid == 0) printf("========================%d %d\n", outbuff->count(), N);
         while (!outbuff->try_partial_final_write(src, N)){
             if (laneid == 0){
                 buffer_t * repl = NULL;

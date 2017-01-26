@@ -44,21 +44,6 @@ public:
     }
 };
 
-struct launch_conf{
-    dim3    gridDim     ;
-    dim3    blockDim    ;
-    int     shared_mem  ;
-    int     device      ;
-
-    int grid_size() const{
-        return gridDim.x  * gridDim.y  * gridDim.z ;
-    }
-
-    int block_size() const{
-        return blockDim.x * blockDim.y * blockDim.z;
-    }
-};
-
 template<typename T,
          typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
             int>::type = 0>
@@ -194,6 +179,35 @@ __host__ void cuda_delete(T *obj, Args... args){
 
 __host__ int get_device(void *p);
 
+
+struct launch_conf{
+    dim3    gridDim     ;
+    dim3    blockDim    ;
+    int     shared_mem  ;
+    int     device      ;
+
+    __host__ __device__ __forceinline__ launch_conf(): device(-5){}
+
+    __host__ __device__ __forceinline__ launch_conf(const dim3 &gridDim, const dim3 &blockDim, int shared_mem, int device): gridDim(gridDim), blockDim(blockDim), shared_mem(shared_mem), device(device){}
+    __host__ __device__ __forceinline__ launch_conf(const launch_conf &o): gridDim(o.gridDim), blockDim(o.blockDim), shared_mem(o.shared_mem), device(o.device){}
+
+    int get_blocks_per_grid() const{
+        return gridDim.x  * gridDim.y  * gridDim.z ;
+    }
+
+    int get_threads_per_block() const{
+        return blockDim.x * blockDim.y * blockDim.z;
+    }
+
+    int get_warps_per_block() const{
+        return (get_threads_per_block() + WARPSIZE - 1) / WARPSIZE;
+    }
+
+    int total_num_of_warps() const{
+        return get_threads_per_block() * get_warps_per_block();
+    }
+};
+
 __device__ __forceinline__ int get_laneid(){
     uint32_t laneid;
     asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
@@ -201,9 +215,31 @@ __device__ __forceinline__ int get_laneid(){
 }
 
 __device__ __forceinline__ int get_warpid(){
-    uint32_t warpid;
-    asm("mov.u32 %0, %%warpid;" : "=r"(warpid));
-    return warpid;
+    return (threadIdx.x + blockDim.x * threadIdx.y + blockDim.x * blockDim.y * threadIdx.z) / warpSize;
+}
+
+__device__ __forceinline__ int get_blockid(){
+    return blockIdx.x + gridDim.x * blockIdx.y + gridDim.x * gridDim.y * blockIdx.z;
+}
+
+__device__ __forceinline__ int get_threads_per_block(){
+    return blockDim.x * blockDim.y * blockDim.z;
+}
+
+__device__ __forceinline__ int get_blocks_per_grid(){
+    return gridDim.x * gridDim.y * gridDim.z;
+}
+
+__device__ __forceinline__ int get_warps_per_block(){
+    return (get_threads_per_block() + WARPSIZE - 1)/WARPSIZE;
+}
+
+__device__ __forceinline__ int get_global_warpid(){
+    return get_blockid() * get_warps_per_block() + get_warpid();
+}
+
+__device__ __forceinline__ int get_total_num_of_warps(){
+    return get_warps_per_block() * get_blocks_per_grid();
 }
 
 __device__ __host__ int __forceinline__ find_nth_set_bit(uint32_t c1, unsigned int n){

@@ -23,6 +23,7 @@
 
 #include "operators/select3.cuh"
 #include "operators/hashjoin.cuh"
+#include "operators/split.cuh"
 
 // #include <nvToolsExt.h>
 
@@ -157,7 +158,7 @@ int main(){
 
     gpu(cudaMemcpy(&builder, &(h->builder), sizeof(d_operator_t *), cudaMemcpyDefault));
 
-    d_operator_t * oprod3   = d_operator_t::create<unstable_select<>>(conf1, builder, conf1.grid_size(), conf1.device);
+    d_operator_t * oprod3   = d_operator_t::create<unstable_select<WARPSIZE, int32_t>>(conf1, builder, conf1.grid_size(), conf1.device);
 
     vector<p_operator_t> parents         = {oprod3};
     vector<launch_conf > parent_conf     = {conf1 };
@@ -211,8 +212,8 @@ int main(){
         auto start = chrono::system_clock::now();
         // M = stable_select_cpu(a, c, N);
         // M = sum_select_cpu(a, c, N);
-        // M = sum_selfjoin_select_cpu(a, c, N);
-        M = sum_hashjoin_select_cpu(a, c, a, d, N, N);
+        M = sum_selfjoin_select_cpu(a, c, N);
+        // M = sum_hashjoin_select_cpu(a, c, a, d, N, N);
         auto end   = chrono::system_clock::now();
         cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
     }

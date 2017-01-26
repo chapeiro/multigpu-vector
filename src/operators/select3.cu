@@ -2,21 +2,25 @@
 
 using namespace std;
 
-template<size_t warp_size, typename T>
-__host__ unstable_select<warp_size, T>::unstable_select(d_operator_t * parent, int grid_size, int dev): 
+__device__ bool filter(int32_t a){
+    return a <= 5000;
+}
+
+template<size_t warp_size, typename... T>
+__host__ unstable_select<warp_size, T...>::unstable_select(d_operator_t * parent, int grid_size, int dev): 
         parent(parent), buffer_size(0), finished(0){
     // output = cuda_new<output_composer<warp_size, T>>(dev, parent, dev);
 
     assert(dev >= 0);
     set_device_on_scope d(dev);
 
-    gpu(cudaMalloc((void**)&buffer, ((grid_size + 1) * 4 * warp_size + 3) * sizeof(T)));
+    gpu(cudaMalloc((void**)&buffer, ((grid_size + 1) * 4 * warp_size + 3) * sizeof(int32_t)));//FIXME: corrent type
 
-    gpu(cudaMemset(buffer + (grid_size + 1) * (4 * warp_size - 1), 0, (grid_size + 4) * sizeof(T)));
+    gpu(cudaMemset(buffer + (grid_size + 1) * (4 * warp_size - 1), 0, (grid_size + 4) * sizeof(int32_t)));//FIXME: corrent type
 }
 
-template<size_t warp_size, typename T>
-__device__ void unstable_select<warp_size, T>::consume_warp(const int32_t *src, unsigned int N){
+template<size_t warp_size, typename... T>
+__device__ void unstable_select<warp_size, T...>::consume_warp(const T *... src, unsigned int N){
     extern __shared__ int32_t s[];
 
     const int32_t warpid            = get_warpid();
@@ -38,7 +42,7 @@ __device__ void unstable_select<warp_size, T>::consume_warp(const int32_t *src, 
         bool predicate = false;
         if (k*warpSize + laneid < N){
             //compute predicate
-            predicate = src[k*warpSize + laneid] <= 5000;
+            predicate = filter(src[k*warpSize + laneid]...);
         }
 
         //aggregate predicate results
@@ -53,7 +57,7 @@ __device__ void unstable_select<warp_size, T>::consume_warp(const int32_t *src, 
             int32_t offset = filterout + __popc(filter & prevwrapmask);
             assert(offset >= 0);
             assert(offset <  5*warpSize);
-            wrapoutput[offset] = src[k*warpSize + laneid];// x.i[k];//input[blockDim.x*k + i];
+            wrapoutput[offset] = get<0>(make_tuple(src[k*warpSize + laneid]...));// x.i[k];//input[blockDim.x*k + i];
         }
 
         filterout += newpop;
@@ -72,8 +76,8 @@ __device__ void unstable_select<warp_size, T>::consume_warp(const int32_t *src, 
     if (laneid == 0) wrapoutput[5*warp_size - 1] = filterout;
 }
 
-template<size_t warp_size, typename T>
-__device__ void unstable_select<warp_size, T>::consume_close(){
+template<size_t warp_size, typename... T>
+__device__ void unstable_select<warp_size, T...>::consume_close(){
     extern __shared__ int32_t s[];
 
     const int32_t warpid            = get_warpid();
@@ -100,6 +104,9 @@ __device__ void unstable_select<warp_size, T>::consume_close(){
 
             int32_t target_filter_out           = (target_wrapid < blockDim.x * blockDim.y/warpSize) ? target_wrapoutput[5*warp_size - 1] : 0;
             int32_t target_filter_out_rem       = target_filter_out;
+
+            assert(target_filter_out < 4*warpSize);
+            assert(target_filter_out >= 0);
 
             for (int32_t k = 0; k < (target_filter_out + warpSize - 1)/warpSize ; ++k){
                 assert(k < 4);
@@ -163,6 +170,7 @@ __device__ void unstable_select<warp_size, T>::consume_close(){
         }
 
         if (totcnt0 >= 4*warpSize){
+            if (totcnt0 > 4*warpSize) printf("%d\n", totcnt0);
             assert(totcnt0 <= 4*warpSize);
             // output.push(buffer+bnum0*(4*warpSize));
             parent->consume_warp(buffer+bnum0*(4*warpSize), 4*warpSize);
@@ -170,6 +178,7 @@ __device__ void unstable_select<warp_size, T>::consume_close(){
             if (laneid == 0) cnts[bnum0] = 0; //clean up for next round
         }
         if (totcnt1 >= 4*warpSize){
+            if (totcnt1 > 4*warpSize) printf("%d\n", totcnt1);
             assert(totcnt1 <= 4*warpSize);
             // output.push(buffer+bnum1*(4*warpSize));
             parent->consume_warp(buffer+bnum1*(4*warpSize), 4*warpSize);
@@ -199,6 +208,7 @@ __device__ void unstable_select<warp_size, T>::consume_close(){
                 finished                        = 0;
                 cnts[buffelems/(4*warpSize)]    = 0;
                 cnts[0]                         = buffelems - start;
+                assert(buffelems - start <= 4*warpSize);
             }
         }
     }
@@ -208,8 +218,8 @@ __device__ void unstable_select<warp_size, T>::consume_close(){
     parent->consume_close();
 }
 
-template<size_t warp_size, typename T>
-__device__ void unstable_select<warp_size, T>::consume_open(){
+template<size_t warp_size, typename... T>
+__device__ void unstable_select<warp_size, T...>::consume_open(){
     parent->consume_open();
 
     __syncthreads();
@@ -227,11 +237,11 @@ __device__ void unstable_select<warp_size, T>::consume_open(){
     if (laneid == 0) *fcount = 0;
 }
 
-template<size_t warp_size, typename T>
-__device__ void unstable_select<warp_size, T>::at_open(){}
+template<size_t warp_size, typename... T>
+__device__ void unstable_select<warp_size, T...>::at_open(){}
 
-template<size_t warp_size, typename T>
-__device__ void unstable_select<warp_size, T>::at_close(){
+template<size_t warp_size, typename... T>
+__device__ void unstable_select<warp_size, T...>::at_close(){
     if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0){
         const uint32_t laneid = get_laneid();
 
@@ -247,18 +257,18 @@ __device__ void unstable_select<warp_size, T>::at_close(){
     }
 }
 
-template<size_t warp_size, typename T>
-__host__ void unstable_select<warp_size, T>::before_open(){
+template<size_t warp_size, typename... T>
+__host__ void unstable_select<warp_size, T...>::before_open(){
     decltype(this->parent) p;
     gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
     p->open();
 }
 
-template<size_t warp_size, typename T>
-__host__ void unstable_select<warp_size, T>::after_close(){
+template<size_t warp_size, typename... T>
+__host__ void unstable_select<warp_size, T...>::after_close(){
     decltype(this->parent) p;
     gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
     p->close();
 }
 
-template class unstable_select<>;
+template class unstable_select<WARPSIZE, int32_t>;

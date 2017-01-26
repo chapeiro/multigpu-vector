@@ -128,8 +128,10 @@ public:
     static __host__ __device__ void release_buffer(buffer_t * buff){//, cudaStream_t strm){
 #ifdef __CUDA_ARCH__
         // assert(strm == 0); //FIXME: something better ?
-        if (buff->device == deviceId) pool->push(buff);
-        else                          assert(false); //FIXME: IMPORTANT free buffer of another device (or host)!
+        if (buff->device == deviceId) {
+            buff->cnt = 0;
+            pool->push(buff);
+        } else                          assert(false); //FIXME: IMPORTANT free buffer of another device (or host)!
 #else
         int dev = get_device(buff);
         if (dev >= 0){

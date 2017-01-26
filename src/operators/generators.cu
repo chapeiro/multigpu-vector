@@ -57,15 +57,18 @@ __host__ void generator::close(){
         buffer_pool<int32_t>::buffer_t::inspector_t insp(strm);
         auto start = chrono::system_clock::now();
         while (N > 0){
-            // buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::get_buffer();
-            buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(1);
+            buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::get_buffer();
+            // buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(1);
 
             int m = min(N, buffer_pool<int32_t>::buffer_t::capacity());
 
-            insp.load(buff, true);
-            insp.overwrite(src, m, false);
+            // insp.load(buff, true);
+            // insp.overwrite(src, m, false);
 
-            insp.save(buff, true);
+            // insp.save(buff, true);
+            // memcpy(buff->data, src, m * sizeof(int32_t));
+            buff->data = src;
+            buff->cnt  = m;
 
             parent->consume(buff);
 
