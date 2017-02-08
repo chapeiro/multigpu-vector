@@ -32,13 +32,12 @@ CXX=./tools/colornvcc
 
 INCLUDE_PATH=-I. 
 
-# CXXFLAGS= -Wl,--no-as-needed -lpthread -pthread -std=c++11 -Wall -D_GNU_SOURCE 
-CXXFLAGS+= -DNQUEUE_WORK
+CXXFLAGS+= -DNQUEUE_WORK -lnuma
 CXXFLAGS+= -O3 -arch=sm_60 -lineinfo --std=c++11 -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED
 CXXFLAGS+= -DNTESTMEMCPY -D__STRICT_ANSI__ 
 CXXFLAGS+= --maxrregcount=32
 CXXFLAGS+= --default-stream per-thread --expt-relaxed-constexpr -rdc=true
-CXXFLAGS+= --compiler-options='-fdiagnostics-color=always $(TFLAGS)'
+CXXFLAGS+= --compiler-options='-Wall -fdiagnostics-color=always $(TFLAGS)'
 
 # PROFFLAGS+= -L/usr/local/cuda/lib64 -lnvToolsExt
 

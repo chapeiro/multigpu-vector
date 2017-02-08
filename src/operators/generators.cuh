@@ -13,9 +13,9 @@ private:
     cudaStream_t                        strm;
     buffer_pool<int32_t>::buffer_t    **buff_ret;
     int32_t                            *src;
-    uint32_t                            N;
+    size_t                              N;
 public:
-    __host__ generator(h_operator_t * parent, int32_t *src, uint32_t N);
+    __host__ generator(h_operator_t * parent, int32_t *src, size_t N);
 
     __host__ void open();
 

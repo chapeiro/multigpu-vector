@@ -10,6 +10,7 @@
 #include "split.cuh"
 #include "union_all.cuh"
 #include "union_all_cpu.cuh"
+#include "mem_move.cuh"
 
 class open_op{
 public:

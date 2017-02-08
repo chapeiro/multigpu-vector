@@ -138,9 +138,7 @@ public:
         printf("------------------------------------------------------------\n");
         atomicAdd((uint32_t *) &producers, 1);
 #else
-        cudaPointerAttributes attrs;
-        gpu(cudaPointerGetAttributes(&attrs, this));
-        set_device_on_scope d(attrs.device);
+        set_device_on_scope d(get_device(this));
         cudaStream_t strm;
         cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
         register_producer_for_host<<<1, 1, 0, strm>>>(this, producer);
@@ -156,9 +154,7 @@ public:
         uint32_t old_prod = atomicSub((uint32_t *) &producers, 1);
         printf("------------------------------------------------------------++%d\n", old_prod - 1);
 #else
-        cudaPointerAttributes attrs;
-        gpu(cudaPointerGetAttributes(&attrs, this));
-        set_device_on_scope d(attrs.device);
+        set_device_on_scope d(get_device(this));
         cudaStream_t strm;
         cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
         unregister_producer_for_host<<<1, 1, 0, strm>>>(this, producer);

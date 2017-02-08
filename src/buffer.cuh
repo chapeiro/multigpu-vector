@@ -167,7 +167,7 @@ class buffer_inspector{
 public:
     typedef buffer<T, size, T4> buffer_t;
 
-private:
+public:
     buffer_t    *buff;
     cudaStream_t strm;
 

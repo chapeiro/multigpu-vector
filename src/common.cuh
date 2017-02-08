@@ -6,7 +6,7 @@
 #include <type_traits>
 
 #ifndef DEFAULT_BUFF_CAP
-#define DEFAULT_BUFF_CAP (1024*1024)
+#define DEFAULT_BUFF_CAP (4*1024*1024)
 #endif
 
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -177,7 +177,7 @@ __host__ void cuda_delete(T *obj, Args... args){
     }
 }
 
-__host__ int get_device(void *p);
+__host__ int get_device(const void *p);
 
 
 struct launch_conf{

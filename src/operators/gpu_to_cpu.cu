@@ -1,10 +1,18 @@
 #include "gpu_to_cpu.cuh"
 #include "../common.cuh"
 #include "../buffer_manager.cuh"
+// #include <nvToolsExt.h>
 
 template<size_t warp_size, size_t size, typename T>
 gpu_to_cpu<warp_size, size, T>::gpu_to_cpu(h_operator_t * parent, int device): 
             lock(0), end(0){
+#ifndef NDEBUG
+    int rc =
+#endif
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &gpu_affinity[device]);
+    assert(rc == 0);
+    this_thread::yield();
+
     gpu(cudaMallocHost(&store, (sizeof(T)+sizeof(int))*size + sizeof(int)));
 
     flags      = (volatile int *) (store + size);
@@ -19,6 +27,7 @@ gpu_to_cpu<warp_size, size, T>::gpu_to_cpu(h_operator_t * parent, int device):
     teleporter_catcher_obj = new gpu_to_cpu_host<warp_size, size, T>(parent, store, flags, eof);
 
     teleporter_catcher = new thread(&gpu_to_cpu_host<warp_size, size, T>::catcher, teleporter_catcher_obj);
+    pthread_setaffinity_np(teleporter_catcher->native_handle(), sizeof(cpu_set_t), &gpu_affinity[device]);
 
     output_buffer = buffer_manager<int32_t>::h_get_buffer(device);
 }
@@ -53,7 +62,7 @@ __device__ void gpu_to_cpu<warp_size, size, T>::consume_warp(const int32_t *src,
     const uint32_t laneid = get_laneid();
     if (N == 4 * warp_size){
         // output.push(x);
-        vec4 tmp_out;
+        vec4 tmp_out;// = reinterpret_cast<const vec4 *>(src)[laneid];
         #pragma unroll
         for (int k = 0 ; k < 4 ; ++k) tmp_out.i[k] = src[k*warpSize + laneid];
 
@@ -147,6 +156,7 @@ void gpu_to_cpu_host<warp_size, size, T>::catcher(){
             this_thread::yield();
         }
         
+        // nvtxMarkA("pop");
         parent->consume(store[front]);
 
         flags[front] = 0;

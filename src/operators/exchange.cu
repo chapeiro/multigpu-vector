@@ -62,8 +62,8 @@ __host__ void exchange::fire(consumer *cons){
 
         if (!p) break;
 
-        this_thread::yield();
         cons->consume(p);
+        this_thread::yield();
     } while (true);
         auto end   = chrono::system_clock::now();
         cout << "T:" << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
@@ -134,9 +134,46 @@ __global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t
 
     const uint32_t N   = min(buff->cnt, buff->capacity());//insp->count();
 
+    // if (blocki == 0 && threadIdx.x == 0 &&  threadIdx.y == 0 && threadIdx.z == 0) buff->cnt = N;
     if (blocki == 0 && threadIdx.x == 0 &&  threadIdx.y == 0 && threadIdx.z == 0 && prev_buff) buffer_manager<int32_t>::release_buffer(prev_buff);
 
-    if (4 * blocki * width < N){
+    if (4 * blocki * width < N){ //FIXME: get back!
+        const int32_t warpoff = 4*(get_warpid() * warpSize + blocki * width);
+
+        const int32_t *src = buff->data;
+
+        op->consume_open();
+
+        __syncthreads();
+
+        for (int j = warpoff ; j < N ; j += bigwidth){
+            // vec4 tmp = reinterpret_cast<const vec4*>(src)[i+j+blocki*width];
+            op->consume_warp(src + j, min(N - j, 4*warpSize));
+        }
+
+        __syncthreads();
+
+        op->consume_close();
+    }
+}
+
+__global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(d_operator_t * op, consumer::buffer_t * buff, uint32_t N, consumer::buffer_t * prev_buff = NULL){
+    // op->consume(buff);
+    // variant::apply_visitor(push(buff), *op);
+
+    const int32_t width     = blockDim.x    * blockDim.y;
+    const int32_t gridwidth = gridDim.x     * gridDim.y ;
+    const int32_t bigwidth  = 4 * (width    * gridwidth);
+
+    // const int32_t i       = threadIdx.x + threadIdx.y * blockDim.x;
+    const int32_t blocki  = blockIdx.x + blockIdx.y * gridDim.x;
+
+    // const uint32_t N   = min(buff->cnt, buff->capacity());//insp->count();
+
+    if (blocki == 0 && threadIdx.x == 0 &&  threadIdx.y == 0 && threadIdx.z == 0) buff->cnt = N;
+    if (blocki == 0 && threadIdx.x == 0 &&  threadIdx.y == 0 && threadIdx.z == 0 && prev_buff) buffer_manager<int32_t>::release_buffer(prev_buff);
+
+    if (4 * blocki * width < N){ //FIXME: get back!
         const int32_t warpoff = 4*(get_warpid() * warpSize + blocki * width);
 
         const int32_t *src = buff->data;
@@ -162,7 +199,8 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
         //parent is running on device
         set_device_on_scope d(device);
         //move buffer
-        if (true){//rand() & 1){
+        // assert(buff_l->cnt > 0);
+        if (get_device(buff_l) != device){//rand() & 1){
             // cudaEvent_t event;
 
             // gpu(cudaEventCreate(&event));
@@ -172,22 +210,69 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
             buffer_pool_t::buffer_t::inspector_t from(strm2);
             buffer_pool_t::buffer_t::inspector_t to  (strm2);
 
-            from.load(buff_l, false);
-            to.load(buff, true);
-            
-            to.overwrite(from.data(), from.count(), false);
+                                                                                // from.load(buff_l, false);
+                                                                                // to.load(buff, true);
+
+            const int32_t * d;
+            uint32_t        cnt;
+            if (get_device(buff_l) < 0){
+                from.load(buff_l, true);
+                d   = from.data();
+                cnt = from.count();
+            } else {
+                d   = buff_l->data;
+                cnt = buff_l->count();
+            }
+                                        // buffer_t * buff2 = buffer_manager<int32_t>::get_buffer();
+                                        // buffer_t * buff3 = buffer_manager<int32_t>::h_get_buffer(device);
+
+                                        // buffer_pool_t::buffer_t::inspector_t from2(strm2);
+                                        // buffer_pool_t::buffer_t::inspector_t to2  (strm2);
+
+                                        // from2.load(buff3, false);
+                                        // to2.load(buff2, true);
+                        
+            buffer_manager<int32_t>::overwrite(buff, d, cnt, strm2, true);
             // to.overwrite(buff_l)
 
-            to.save(buff, true);
+                                                                                // to.save(buff, true);
 
-            buff_l = buff;
+            // cout << to.buff->cnt << " ";
+            // to.load(buff, true);
+
+            // cout << to.buff->cnt << " " << buff_l->cnt << endl;
+            // assert(to.count() == buff_l->cnt);
+
+            // buff_l = buff;
 
             // gpu(cudaEventRecord(event, strm2));
 
             // gpu(cudaStreamWaitEvent(strm, event, 0));
 
-            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff_l, prev_buff);
-            prev_buff = buff_l;
+            // gpu(cudaStreamSynchronize(strm2));
+
+        // const size_t memsize = sizeof(int32_t)*1024*1024*4;
+            
+        //     gpu(cudaMemcpyAsync(d_data_in[1 ^ (i & 1)], h_data_in[1 ^ (i & 1)], memsize, cudaMemcpyDefault, strmt[1]));
+        //     gpu(cudaMemcpyAsync(h_data_in[i & 1], d_data_in[i & 1], memsize, cudaMemcpyDefault, strmt[0]));
+            
+
+            // gpu(cudaMemcpyAsync((int32_t *) from2.data(), to2.data(), buffer_pool_t::buffer_t::inspector_t::capacity()*sizeof(int32_t), cudaMemcpyDefault, strm2));
+            // // gpu(cudaStreamSynchronize(strm2));
+
+            // gpu(cudaMemcpyAsync((int32_t *) from.data(), to.data(), buffer_pool_t::buffer_t::inspector_t::capacity()*sizeof(int32_t), cudaMemcpyDefault, strm));
+            // // gpu(cudaMemcpyAsync((int32_t *) to.data(), from.data(), buffer_pool_t::buffer_t::inspector_t::capacity()*sizeof(int32_t), cudaMemcpyDefault, strm2));
+            // cout << to.data() << " " << from.data() << " " << from2.data() << " " << to2.data() << endl;
+            
+            
+            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff, from.count(), prev_buff);
+
+            if (get_device(buff_l) != device) {
+                buffer_manager<int32_t>::release_buffer(buff_l);
+                prev_buff = NULL;
+            } else {
+                prev_buff = buff;
+            }
         } else {
             launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff_l, prev_buff);
             prev_buff = buff_l;
@@ -212,9 +297,21 @@ __host__ consumer::consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, in
 
     if (device >= 0){
         set_device_on_scope d(device);
+        cout << "asdasd" << endl;
 
         cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
         cudaStreamCreateWithFlags(&strm2, cudaStreamNonBlocking);
+
+        const size_t memsize = sizeof(int32_t)*1024*1024*4;
+
+        for (int i = 0 ; i < 2 ; ++i){
+            gpu(cudaMallocHost(&h_data_in[i], memsize));//, cudaHostAllocDefault));
+            gpu(cudaMalloc(&d_data_in[i], memsize));
+
+            gpu(cudaStreamCreateWithFlags(&strmt[i], cudaStreamNonBlocking));
+        }
+
+        i = 0;
 
         // shared_mem = 0;//getSharedMemoryRequirements();
     }
@@ -249,6 +346,13 @@ __host__ consumer::consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, in
 
 __host__ void consumer::open(){
     if (device >= 0){
+#ifndef NDEBUG
+        int rc =
+#endif
+        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &gpu_affinity[device]);
+        assert(rc == 0);
+        this_thread::yield();
+
         parent.d->open();
     } else {
         parent.h->open();

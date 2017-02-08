@@ -50,6 +50,10 @@ private:
     vector<thread>  execs;
     buffer_t      * prev_buff;
     
+    int32_t * h_data_in[2];
+    int32_t * d_data_in[2];
+    cudaStream_t strmt[2];
+    int i;
 public:
     __host__ consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, int shared_mem);
 

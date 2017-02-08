@@ -9,7 +9,7 @@
 
 using namespace std;
 
-__host__ generator::generator(h_operator_t * parent, int32_t *src, uint32_t N):
+__host__ generator::generator(h_operator_t * parent, int32_t *src, size_t N):
         parent(parent), src(src), N(N){
     // parent->open();
 
@@ -58,9 +58,10 @@ __host__ void generator::close(){
         auto start = chrono::system_clock::now();
         while (N > 0){
             buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::get_buffer();
+
             // buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(1);
 
-            int m = min(N, buffer_pool<int32_t>::buffer_t::capacity());
+            size_t m = min(N, (size_t) buffer_pool<int32_t>::buffer_t::capacity());
 
             // insp.load(buff, true);
             // insp.overwrite(src, m, false);
@@ -69,7 +70,8 @@ __host__ void generator::close(){
             // memcpy(buff->data, src, m * sizeof(int32_t));
             buff->data = src;
             buff->cnt  = m;
-
+            
+            assert(m > 0);
             parent->consume(buff);
 
             N   -= m;

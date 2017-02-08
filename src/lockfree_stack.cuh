@@ -17,7 +17,7 @@ using namespace std;
  * * http://blog.memsql.com/common-pitfalls-in-writing-lock-free-algorithms/
  */
 template<typename T, T invalid_value = numeric_limits<T>::max()>
-class lockfree_stack{
+class lockfree_stack{ //FIXME: must have a bug
 private:
     union alignas(sizeof(uint64_t)) tagged_uint32_t{
         uint64_t pack;

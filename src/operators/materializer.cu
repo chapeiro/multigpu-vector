@@ -4,7 +4,7 @@
 __host__ materializer::materializer(int32_t * dst): dst(dst), size(0), ms(0){//, out(&out){
     gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
     insp = new buffer_pool<int32_t>::buffer_t::inspector_t(strm);
-    gpu(cudaMallocHost(&out_buff, sizeof(int32_t)*buffer_pool<int32_t>::buffer_t::capacity()));
+    // gpu(cudaMallocHost(&out_buff, sizeof(int32_t)*buffer_pool<int32_t>::buffer_t::capacity()));
 }
 
 __host__ __device__ void materializer::consume(buffer_pool<int32_t>::buffer_t * data){
@@ -13,12 +13,18 @@ __host__ __device__ void materializer::consume(buffer_pool<int32_t>::buffer_t * 
 #else
     auto start = chrono::system_clock::now();
 
-    insp->load(data, true);
-    
-    uint32_t       cnt = insp->count();
+                                                                                // insp->load(data, true);
+                                                                                
+                                                                                // uint32_t       cnt = insp->count();
 
-    insp->read(dst+size, cnt);
-    size += cnt;
+                                                                                // insp->read(dst+size, cnt);
+                                                                                // size += cnt;
+
+                        // uint32_t cnt = data->cnt;
+                        // memcpy(dst+size, data->data, sizeof(int32_t) * cnt);
+                        // size += cnt;
+
+
 
     // dst.insert(dst.data()+dst.size()-cnt, out_buff, out_buff+cnt);
     // dst.resize(dst.size() + cnt);

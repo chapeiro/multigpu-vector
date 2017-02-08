@@ -19,6 +19,7 @@ private:
     volatile int                           *flags;
     volatile int                           *eof;
     size_t                                  front;
+    int                                     device;
 
 private:
     void catcher();

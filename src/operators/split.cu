@@ -25,7 +25,7 @@ __host__ void split<warp_size, T>::before_open(){
 
     d_operator_t *ps[s->num_of_parents];
     gpu(cudaMemcpy(&ps, s->parents, sizeof(d_operator_t *)*s->num_of_parents, cudaMemcpyDefault));
-    printf("+%llx\n", s->to_parents);
+    printf("+%p\n", s->to_parents);
 
     for (int i = 0 ; i < s->num_of_parents ; ++i) ps[i]->open();
 
@@ -52,7 +52,7 @@ __device__ int hash3(int32_t x){
 
 template<size_t warp_size, typename T>
 __device__ void split<warp_size, T>::consume_warp(const T * src, unsigned int N){
-    assert(N >= 0 && N <= 4*warp_size);
+    assert(N <= 4*warp_size);
 
     const int32_t warpid            = get_warpid();
     const int32_t laneid            = get_laneid();
@@ -77,7 +77,6 @@ __device__ void split<warp_size, T>::consume_warp(const T * src, unsigned int N)
             int base          = parent_base(i, warp_global_index);
             int32_t filterout;
             if (laneid == 0) assert(base + 5 * warp_size - 1 < max_index);
-            if (laneid == 0) assert(base + 5 * warp_size - 1 >= 0);
             if (laneid == 0) filterout = to_parents[base + 5 * warp_size - 1];
             filterout = brdcst(filterout, 0);
 
@@ -138,7 +137,6 @@ __device__ void split<warp_size, T>::at_close(){ //FIXME: optimize
         int base = parent_base(i, warp_global_index);
         int32_t cnt;
         if (laneid == 0) assert(base + 5 * warp_size - 1 < max_index);
-        if (laneid == 0) assert(base + 5 * warp_size - 1 >= 0);
         if (laneid == 0) cnt = to_parents[base + 5 * warp_size - 1];
         cnt = brdcst(cnt, 0);
         if (cnt > 0){
@@ -157,7 +155,7 @@ __host__ void split<warp_size, T>::after_close(){
 
     d_operator_t *ps[s->num_of_parents];
     gpu(cudaMemcpy(&ps, s->parents, sizeof(d_operator_t *)*s->num_of_parents, cudaMemcpyDefault));
-    printf("%llx\n", s->to_parents);
+    printf("%p\n", s->to_parents);
 
     for (int i = 0 ; i < s->num_of_parents ; ++i) ps[i]->close();
 
