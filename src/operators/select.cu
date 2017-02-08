@@ -5,6 +5,7 @@
 #include <cstring>
 #include "select.cuh"
 #include "common.cuh"
+#include "buffer_manager.cuh"
 
 using namespace std;
 
@@ -16,7 +17,7 @@ __device__ __forceinline__ void push_results(volatile int32_t *src, int32_t *dst
 
     uint32_t elems_old;
     if (laneid == 0) elems_old = atomicAdd(elems, 4*warpSize);
-    elems_old = broadcast(elems_old, 0);
+    elems_old = brdcst(elems_old, 0);
 
     vec4 tmp_out;
     #pragma unroll
@@ -24,7 +25,6 @@ __device__ __forceinline__ void push_results(volatile int32_t *src, int32_t *dst
     reinterpret_cast<vec4*>(dst)[elems_old/4 + laneid] = tmp_out;
 }
 
-__managed__ buffer_pool<int32_t> *buffpool;
 
 template<size_t warp_size, typename T>
 __device__ __forceinline__ void unstable_select_gpu_device<warp_size, T>::push_results(volatile int32_t *src, uint32_t* elems) volatile{
@@ -33,7 +33,7 @@ __device__ __forceinline__ void unstable_select_gpu_device<warp_size, T>::push_r
 
     uint32_t elems_old;
     if (laneid == 0) elems_old = atomicAdd(elems, 4*warpSize);
-    elems_old = broadcast(elems_old, 0);
+    elems_old = brdcst(elems_old, 0);
 
     __threadfence();
     vec4 tmp_out;
@@ -47,7 +47,7 @@ __device__ __forceinline__ void unstable_select_gpu_device<warp_size, T>::push_r
 #ifndef NDEBUG
             bool n_endofbuffers = 
 #endif
-            buffpool->acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
+            buffer_manager<int32_t>::acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
             assert(n_endofbuffers);
 
             if (repl){
@@ -126,7 +126,7 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, unstab
                 filterout                     -= 4*warpSize;
             }
 
-            __syncthreads(); //FIXME: this should not be needed, but racecheck produces errors without it
+            // __syncthreads(); //FIXME: this should not be needed, but racecheck produces errors without it
         }
     }
 
@@ -169,7 +169,7 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, unstab
     if (warpid == 0 && filterout){
         int32_t elems_old;
         if (laneid == 0) elems_old = atomicAdd(buffer_size, filterout);
-        elems_old = broadcast(elems_old, 0);
+        elems_old = brdcst(elems_old, 0);
 
         volatile int32_t * buffoff = buffer  + elems_old;
         volatile int32_t * aligned = (int32_t *) round_up((uintptr_t) buffoff, warpSize * sizeof(int32_t));
@@ -194,12 +194,12 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, unstab
 
         int32_t totcnt0;
         if (laneid == 0) totcnt0 = atomicAdd(cnts + bnum0, nset0);
-        totcnt0 = broadcast(totcnt0, 0) + nset0;
+        totcnt0 = brdcst(totcnt0, 0) + nset0;
 
         int32_t totcnt1 = -1;
         if (nset1){
             if (laneid == 0) totcnt1 = atomicAdd(cnts + bnum1, nset1);
-            totcnt1 = broadcast(totcnt1, 0) + nset1;
+            totcnt1 = brdcst(totcnt1, 0) + nset1;
         }
 
         if (totcnt0 >= 4*warpSize){
@@ -218,7 +218,7 @@ __global__ __launch_bounds__(65536, 4) void unstable_select(int32_t *src, unstab
 
         int32_t finished_old;
         if (laneid == 0) finished_old = atomicAdd(finished, 1);
-        finished_old = broadcast(finished_old, 0);
+        finished_old = brdcst(finished_old, 0);
 
         if (finished_old == gridwidth - 1){ //every other block has finished
             int32_t buffelems = *buffer_size;
@@ -261,7 +261,7 @@ __device__ void unstable_select_gpu_device<warp_size, T>::unstable_select_flush(
 #ifndef NDEBUG
             bool n_endofbuffers = 
 #endif
-            buffpool->acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
+            buffer_manager<int32_t>::acquire_buffer_blocked_to((buffer_t **) &output_buffer, &repl);
             assert(n_endofbuffers);
 
             if (repl){

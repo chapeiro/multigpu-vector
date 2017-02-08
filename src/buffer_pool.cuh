@@ -29,7 +29,7 @@ class buffer_pool;
 __global__ void register_producer_for_host(buffer_pool<int32_t, DEFAULT_BUFF_CAP> *self, void* prod);
 __global__ void unregister_producer_for_host(buffer_pool<int32_t, DEFAULT_BUFF_CAP> *self, void* prod);
 __global__ void acquire_buffer_blocked_unsafe_for_host(buffer_pool<int32_t, DEFAULT_BUFF_CAP> *self, buffer<int32_t, DEFAULT_BUFF_CAP> ** ret);
-__global__ void release_buffer_host(buffer_pool<int32_t, DEFAULT_BUFF_CAP> *self, buffer<int32_t, DEFAULT_BUFF_CAP> *buff);
+__global__ void release_buffer_host2(buffer_pool<int32_t, DEFAULT_BUFF_CAP> *self, buffer<int32_t, DEFAULT_BUFF_CAP> *buff);
 
 
 template<typename T, size_t buffer_capacity, typename buff_t, typename pool_t>
@@ -43,8 +43,10 @@ public:
     volatile uint32_t   producers;
     volatile uint32_t   available_buffers;
 
+    size_t sz; //FIXME: remove
+
 public:
-    __host__ buffer_pool(size_t size, size_t fill_size, uint32_t producers = 0, int device = 0) : producers(producers), available_buffers(fill_size){
+    __host__ buffer_pool(size_t size, size_t fill_size, int device = 0) : producers(0), available_buffers(fill_size), sz(size){
         vector<buffer_t *> buffs;
         for (size_t i = 0 ; i < fill_size ; ++i) buffs.push_back(cuda_new<buffer_t>(device, device));
         pool = cuda_new<pool_t>(device, size, buffs, device);
@@ -53,30 +55,30 @@ public:
     __host__ ~buffer_pool(){
         // assert(pool->full());
         // while (!pool->empty()) cuda_delete(pool->pop_blocked());
+        printf("asdasdasf\n");
         cuda_delete(pool);
     }
 
-    __device__ inline bool acquire_buffer_blocked_to(buffer_t** volatile ret, buffer_t** replaced){
-        assert(__ballot(1) == 1);
-        buffer_t * outbuff = *ret;
-        if (replaced) *replaced = NULL;
-        while (!outbuff->may_write()){
-            buffer_t * tmp;
-            if (pool->try_pop(&tmp)){ //NOTE: we can not get the current buffer as answer, as it is not released yet
-                // assert(tmp != outbuff); //NOTE: we can... it may have been released
-                tmp->clean();
-                buffer_t * oldb = atomicCAS(ret, outbuff, tmp);
-                if (oldb != outbuff) pool->push(tmp);
-                else                {
-                    atomicSub((uint32_t *) &available_buffers, 1);
-                    if (replaced) *replaced = outbuff;
-                    return true;
-                }
-            } else if (!producers && !available_buffers) return false;
-            outbuff = *ret;
-        }
-        return true;
-    }
+    // __device__ inline bool acquire_buffer_blocked_to(buffer_t** volatile ret, buffer_t** replaced){
+    //     assert(__ballot(1) == 1);
+    //     buffer_t * outbuff = *ret;
+    //     if (replaced) *replaced = NULL;
+    //     while (!outbuff->may_write()){
+    //         buffer_t * tmp;
+    //         if (buffer_manager::try_get_buffer(&tmp)){ //NOTE: we can not get the current buffer as answer, as it is not released yet
+    //             // assert(tmp != outbuff); //NOTE: we can... it may have been released
+    //             buffer_t * oldb = atomicCAS(ret, outbuff, tmp);
+    //             if (oldb != outbuff) buffer_manager::release_buffer(tmp);
+    //             else                {
+    //                 atomicSub((uint32_t *) &available_buffers, 1);
+    //                 if (replaced) *replaced = outbuff;
+    //                 return true;
+    //             }
+    //         } else if (!producers && !available_buffers) return false;
+    //         outbuff = *ret;
+    //     }
+    //     return true;
+    // }
 
     __device__ inline buffer_t * acquire_buffer_blocked_unsafe(){
         assert(__ballot(1) == 1);
@@ -89,12 +91,12 @@ public:
                 return tmp;
             } else if (!producers && !available_buffers) return pool_t::get_invalid();
         }
-        printf("--------------------------------_>timeout%d %d %d\n", cnt, producers, available_buffers);
+        // printf("--------------------------------_>timeout%d %d %d\n", cnt, producers, available_buffers);
         return (buffer_t *) 1;
     }
 
 
-    __host__ inline buffer_t* h_acquire_buffer_blocked(buffer_t ** buff, buffer_t ** buff_ret, cudaStream_t strm){
+    __host__ inline buffer_t* h_acquire_buffer_blocked(buffer_t ** buff_ret, cudaStream_t strm){
         
         acquire_buffer_blocked_unsafe_for_host<<<1, 1, 0, strm>>>(this, buff_ret);
         
@@ -128,7 +130,7 @@ public:
     }
 
     __host__ inline void h_release_buffer(buffer_t * buff, cudaStream_t strm){
-        release_buffer_host<<<1, 1, 0, strm>>>(this, buff);
+        release_buffer_host2<<<1, 1, 0, strm>>>(this, buff);
     }
 
     __host__ __device__  inline void register_producer(void * producer){
@@ -136,9 +138,7 @@ public:
         printf("------------------------------------------------------------\n");
         atomicAdd((uint32_t *) &producers, 1);
 #else
-        cudaPointerAttributes attrs;
-        gpu(cudaPointerGetAttributes(&attrs, this));
-        set_device_on_scope d(attrs.device);
+        set_device_on_scope d(get_device(this));
         cudaStream_t strm;
         cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
         register_producer_for_host<<<1, 1, 0, strm>>>(this, producer);
@@ -151,12 +151,10 @@ public:
     __host__ __device__ inline void unregister_producer(void * producer){
 #ifdef __CUDA_ARCH__
         assert(producers);
-        printf("------------------------------------------------------------++\n");
-        atomicSub((uint32_t *) &producers, 1);
+        uint32_t old_prod = atomicSub((uint32_t *) &producers, 1);
+        printf("------------------------------------------------------------++%d\n", old_prod - 1);
 #else
-        cudaPointerAttributes attrs;
-        gpu(cudaPointerGetAttributes(&attrs, this));
-        set_device_on_scope d(attrs.device);
+        set_device_on_scope d(get_device(this));
         cudaStream_t strm;
         cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking);
         unregister_producer_for_host<<<1, 1, 0, strm>>>(this, producer);

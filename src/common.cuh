@@ -6,7 +6,7 @@
 #include <type_traits>
 
 #ifndef DEFAULT_BUFF_CAP
-#define DEFAULT_BUFF_CAP (1024*1024)
+#define DEFAULT_BUFF_CAP (4*1024*1024)
 #endif
 
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -130,27 +130,132 @@ __device__ T atomicSub(T *address, T val){
 
 template<typename T, typename... Args>
 __host__ T * cuda_new(int dev, Args... args){
-    set_device_on_scope d(dev);
-    T *tmp = new T(args...);
-    T *res;
-    gpu(cudaMalloc((void**) &res, sizeof(T)));
-    gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
-    free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
-                //      trigger initialization but we want to free the 
-                //      corresponding memory after moving to device 
-                //      without triggering the destructor
-    gpu(cudaDeviceSynchronize());
-    return res;
+    if (dev >= 0){
+        set_device_on_scope d(dev);
+        T *tmp = new T(args...);
+        T *res;
+        gpu(cudaMalloc((void**) &res, sizeof(T)));
+        gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaDeviceSynchronize());
+        free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
+                    //      trigger initialization but we want to free the 
+                    //      corresponding memory after moving to device 
+                    //      without triggering the destructor
+        return res;
+    } else {
+        T *tmp = new T(args...);
+        T *res;
+        gpu(cudaMallocHost((void**) &res, sizeof(T)));
+        gpu(cudaMemcpy(res, tmp, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaDeviceSynchronize());
+        free(tmp);  //NOTE: bad practice ? we want to allocate tmp by new to
+                    //      trigger initialization but we want to free the 
+                    //      corresponding memory after moving to device 
+                    //      without triggering the destructor
+        return res;
+        // return new T(args...);
+    }
 }
 
 
 template<typename T, typename... Args>
 __host__ void cuda_delete(T *obj, Args... args){
-    T *tmp = (T *) malloc(sizeof(T));
-    gpu(cudaDeviceSynchronize());
-    gpu(cudaMemcpy(tmp, obj, sizeof(T), cudaMemcpyDefault));
-    gpu(cudaFree(obj));
-    delete tmp;
+    int device = get_device(obj);
+    if (device >= 0){
+        T *tmp = (T *) malloc(sizeof(T));
+        gpu(cudaDeviceSynchronize());
+        gpu(cudaMemcpy(tmp, obj, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaFree(obj));
+        delete tmp;
+    } else {
+        T *tmp = (T *) malloc(sizeof(T));
+        gpu(cudaDeviceSynchronize());
+        gpu(cudaMemcpy(tmp, obj, sizeof(T), cudaMemcpyDefault));
+        gpu(cudaFreeHost(obj));
+        delete tmp;
+        // delete obj;
+    }
+}
+
+__host__ int get_device(const void *p);
+
+
+struct launch_conf{
+    dim3    gridDim     ;
+    dim3    blockDim    ;
+    int     shared_mem  ;
+    int     device      ;
+
+    __host__ __device__ __forceinline__ launch_conf(): device(-5){}
+
+    __host__ __device__ __forceinline__ launch_conf(const dim3 &gridDim, const dim3 &blockDim, int shared_mem, int device): gridDim(gridDim), blockDim(blockDim), shared_mem(shared_mem), device(device){}
+    __host__ __device__ __forceinline__ launch_conf(const launch_conf &o): gridDim(o.gridDim), blockDim(o.blockDim), shared_mem(o.shared_mem), device(o.device){}
+
+    int get_blocks_per_grid() const{
+        return gridDim.x  * gridDim.y  * gridDim.z ;
+    }
+
+    int get_threads_per_block() const{
+        return blockDim.x * blockDim.y * blockDim.z;
+    }
+
+    int get_warps_per_block() const{
+        return (get_threads_per_block() + WARPSIZE - 1) / WARPSIZE;
+    }
+
+    int total_num_of_warps() const{
+        return get_threads_per_block() * get_warps_per_block();
+    }
+};
+
+__device__ __forceinline__ int get_laneid(){
+    uint32_t laneid;
+    asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+    return laneid;
+}
+
+__device__ __forceinline__ int get_warpid(){
+    return (threadIdx.x + blockDim.x * threadIdx.y + blockDim.x * blockDim.y * threadIdx.z) / warpSize;
+}
+
+__device__ __forceinline__ int get_blockid(){
+    return blockIdx.x + gridDim.x * blockIdx.y + gridDim.x * gridDim.y * blockIdx.z;
+}
+
+__device__ __forceinline__ int get_threads_per_block(){
+    return blockDim.x * blockDim.y * blockDim.z;
+}
+
+__device__ __forceinline__ int get_blocks_per_grid(){
+    return gridDim.x * gridDim.y * gridDim.z;
+}
+
+__device__ __forceinline__ int get_warps_per_block(){
+    return (get_threads_per_block() + WARPSIZE - 1)/WARPSIZE;
+}
+
+__device__ __forceinline__ int get_global_warpid(){
+    return get_blockid() * get_warps_per_block() + get_warpid();
+}
+
+__device__ __forceinline__ int get_total_num_of_warps(){
+    return get_warps_per_block() * get_blocks_per_grid();
+}
+
+__device__ __host__ int __forceinline__ find_nth_set_bit(uint32_t c1, unsigned int n){
+    int t, i = n, r = 0;
+    uint32_t c2  = c1 - ((c1 >> 1) & 0x55555555);
+    uint32_t c4  = ((c2 >> 2) & 0x33333333) + (c2 & 0x33333333);
+    uint32_t c8  = ((c4 >> 4) + c4) & 0x0f0f0f0f;
+    uint32_t c16 = ((c8 >> 8) + c8);
+    uint32_t c32 = ((c16 >> 16) + c16) & 0x3f;
+    t = (c16    ) & 0x1f; if (i >= t) { r += 16; i -= t; }
+    t = (c8 >> r) & 0x0f; if (i >= t) { r +=  8; i -= t; }
+    t = (c4 >> r) & 0x07; if (i >= t) { r +=  4; i -= t; }
+    t = (c2 >> r) & 0x03; if (i >= t) { r +=  2; i -= t; }
+    t = (c1 >> r) & 0x01; if (i >= t) { r +=  1;         }
+    if (n >= c32) r = -1;
+    return r; 
 }
 
 union vec4{
@@ -170,7 +275,7 @@ __device__ __host__ inline constexpr T round_down(T num, T mult){
 
 #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
 template<typename T>
-__device__ __forceinline__ T broadcast(T val, uint32_t src){
+__device__ __forceinline__ T brdcst(T val, uint32_t src){
 #ifdef __CUDA_ARCH__
     uint32_t laneid;
     asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
@@ -184,7 +289,7 @@ __device__ __forceinline__ T broadcast(T val, uint32_t src){
 #endif
 }
 #else
-   #define broadcast(v, l) (__shfl(v, l))
+   #define brdcst(v, l) (__shfl(v, l))
 #endif
 
 

@@ -59,7 +59,7 @@ __global__ void unregister_producer_for_host(buffer_pool<int32_t, DEFAULT_BUFF_C
 }
 
 
-__global__ void release_buffer_host(buffer_pool<int32_t, DEFAULT_BUFF_CAP> *self, buffer<int32_t, DEFAULT_BUFF_CAP> *buff){
+__global__ void release_buffer_host2(buffer_pool<int32_t, DEFAULT_BUFF_CAP> *self, buffer<int32_t, DEFAULT_BUFF_CAP> *buff){
     assert(blockDim.x * blockDim.y * blockDim.z == 1);
     assert( gridDim.x *  gridDim.y *  gridDim.z == 1);
     self->release_buffer(buff);
