@@ -15,14 +15,18 @@ private:
     vector<T> data;
     mutex     m;
     condition_variable cv;
+    size_t    size;
 
 public:
-    __host__ threadsafe_stack(size_t size, vector<T> fill){
+    __host__ threadsafe_stack(size_t size, vector<T> fill): size(size){
         data.reserve(size);
         for (const auto &t: fill) data.push_back(t);
     }
 
-    __host__ ~threadsafe_stack(){}
+    __host__ ~threadsafe_stack(){
+        cout << "=========================================================>host_stack: " << data.size() << " " << size << endl;
+        // assert(data.size() == size);
+    }
 
 public:
     __host__ void push(T v){

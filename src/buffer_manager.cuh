@@ -15,21 +15,9 @@ using namespace std;
 extern __device__ __constant__ threadsafe_device_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> * pool;
 extern __device__ __constant__ int deviceId;
 
-extern mutex                                              *devive_buffs_mutex;
-extern vector<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *> *device_buffs_pool;
-extern buffer<int32_t, DEFAULT_BUFF_CAP, vec4>          ***device_buff;
-extern int                                                 device_buff_size;
-extern int                                                 keep_threshold;
-
-extern cudaStream_t                                       *release_streams;
 
 extern cpu_set_t                                          *gpu_affinity;
 extern cpu_set_t                                          *cpu_numa_affinity;
-
-extern threadsafe_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> ** h_pool;
-extern threadsafe_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> ** h_pool_numa;
-
-extern unordered_map<buffer<int32_t, DEFAULT_BUFF_CAP, vec4> *, int32_t *> buffer_cache;
 
 template<typename T>
 class buffer_manager;
@@ -44,6 +32,23 @@ public:
     typedef buffer<int32_t, DEFAULT_BUFF_CAP, vec4> buffer_t;
     typedef threadsafe_device_stack<buffer_t *, (buffer_t *) NULL>        pool_t;
     typedef threadsafe_stack       <buffer_t *, (buffer_t *) NULL>      h_pool_t;
+
+
+    static mutex                                              *devive_buffs_mutex;
+    static vector<buffer_t *>                                 *device_buffs_pool;
+    static buffer_t                                         ***device_buff;
+    static int                                                 device_buff_size;
+    static int                                                 keep_threshold;
+
+    static cudaStream_t                                       *release_streams;
+
+    static threadsafe_stack<buffer_t *, (buffer_t *) NULL>   **h_pool;
+    static threadsafe_stack<buffer_t *, (buffer_t *) NULL>   **h_pool_numa;
+
+    static unordered_map<buffer_t *, T *>                      buffer_cache;
+
+
+
 
     static __host__ void init(int size = 64, int buff_buffer_size = 8, int buff_keep_threshold = 16);
 
@@ -75,23 +80,7 @@ public:
         return false;
     }
 
-    static __host__ inline buffer_t * h_get_buffer(int dev){
-        if (dev >= 0){
-            unique_lock<std::mutex> lock(devive_buffs_mutex[dev]);
-            if (device_buffs_pool[dev].empty()){
-                set_device_on_scope d(dev);
-                get_buffer_host<<<1, 1, 0, release_streams[dev]>>>(device_buff[dev], device_buff_size);
-                gpu(cudaStreamSynchronize(release_streams[dev]));
-                device_buffs_pool[dev].insert(device_buffs_pool[dev].end(), device_buff[dev], device_buff[dev]+device_buff_size);
-                // gpu(cudaFreeHost(buff));
-            }
-            buffer_t * ret = device_buffs_pool[dev].back();
-            device_buffs_pool[dev].pop_back();
-            return ret;
-        } else {
-            return get_buffer();
-        }
-    }
+    static __host__ inline buffer_t * h_get_buffer(int dev);
 
     static __host__ __device__ void release_buffer(buffer_t * buff){//, cudaStream_t strm){
 #ifdef __CUDA_ARCH__
@@ -117,13 +106,20 @@ public:
                 // gpu(cudaDeviceSynchronize());
             }
         } else {
+            assert(buffer_cache.find(buff) != buffer_cache.end());
+            buff->data = buffer_cache.find(buff)->second;
+            assert(buff->device < 0);
+            assert(get_device(buff->data) < 0);
             int status[1];
             int ret_code;
             status[0]=-1;
             ret_code=move_pages(0 /*self memory */, 1, (void **) &buff->data, NULL, status, 0);
             // printf("-=Memory at %p is at %d node (retcode %d) cpu: %d\n", buff->data, status[0], ret_code, sched_getcpu());
+            assert(ret_code == 0);
 
+            printf("===============================================================> %d %p %d %d\n", buff->device, buff->data, get_device(buff->data), status[0]);
             h_pool_numa[status[0]]->push(buff);
+            printf("%d %p %d\n", buff->device, buff->data, status[0]);
         }
 #endif
     }
@@ -179,5 +175,33 @@ public:
 
     static __host__ void destroy(); //FIXME: cleanup...
 };
+
+
+template<typename T>
+threadsafe_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> ** buffer_manager<T>::h_pool;
+
+template<typename T>
+threadsafe_stack<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *, (buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *) NULL> ** buffer_manager<T>::h_pool_numa;
+
+template<typename T>
+unordered_map<buffer<int32_t, DEFAULT_BUFF_CAP, vec4> *, T *> buffer_manager<T>::buffer_cache;
+
+template<typename T>
+mutex                                              *buffer_manager<T>::devive_buffs_mutex;
+
+template<typename T>
+vector<buffer<int32_t, DEFAULT_BUFF_CAP, vec4>  *> *buffer_manager<T>::device_buffs_pool;
+
+template<typename T>
+buffer<int32_t, DEFAULT_BUFF_CAP, vec4>          ***buffer_manager<T>::device_buff;
+
+template<typename T>
+int                                                 buffer_manager<T>::device_buff_size;
+
+template<typename T>
+int                                                 buffer_manager<T>::keep_threshold;
+
+template<typename T>
+cudaStream_t                                       *buffer_manager<T>::release_streams;
 
 #endif /* BUFFER_MANAGER_CUH_ */

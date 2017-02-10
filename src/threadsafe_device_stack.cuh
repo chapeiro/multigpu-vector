@@ -38,7 +38,9 @@ public:
     }
 
     __host__ ~threadsafe_device_stack(){
-        gpu(cudaFree(data));
+        gpu(cudaFree((T *) data));
+        cout << "----------------------------------------------------->" << cnt << " " << size << endl;
+        // assert(cnt == size);
     }
 
 public:

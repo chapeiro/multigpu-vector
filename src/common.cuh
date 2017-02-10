@@ -4,6 +4,9 @@
 #include <iostream>
 #include <cassert>
 #include <type_traits>
+#include <utmpx.h>
+#include <unistd.h>
+#include <numaif.h>
 
 #ifndef DEFAULT_BUFF_CAP
 #define DEFAULT_BUFF_CAP (4*1024*1024)
@@ -292,7 +295,18 @@ __device__ __forceinline__ T brdcst(T val, uint32_t src){
    #define brdcst(v, l) (__shfl(v, l))
 #endif
 
-
+template<typename T>
+int get_numa_addressed(T * m){
+    T * mtest = m;//(T *) (((uintptr_t) m) & ~(((uintptr_t) getpagesize()) - 1));
+    int status[1];
+    status[0]=-1;
+#ifndef NDEBUG
+    int ret_code = 
+#endif
+    move_pages(0 /*self memory */, 1, (void **) &mtest, NULL, status, 0);
+    assert(ret_code == 0);
+    return status[0];
+}
 
 //Can not use this as in the end it calls a host function...
 template<typename T, typename Operator, typename... Args>

@@ -211,7 +211,8 @@ pair<vector<generator *>, materializer *> create_sum_select_pipeline(int32_t *ds
     
     vector<p_operator_t> pipelines;
     for (const auto &conf: confs){
-        d_operator_t * g2c                                                      = d_operator_t::create<     gpu_to_cpu<>                         >(conf, xroot_pre, conf.device);
+        h_operator_t * mmv                                                      = h_operator_t::create<     mem_move                             >(xroot_pre);
+        d_operator_t * g2c                                                      = d_operator_t::create<     gpu_to_cpu<>                         >(conf, mmv, conf.device);
         d_operator_t * aggr                                                     = d_operator_t::create<     aggregation<>                        >(conf, g2c , 8000, conf.get_blocks_per_grid(), conf.device);
         d_operator_t * sel                                                      = d_operator_t::create<     unstable_select<WARPSIZE, less_eq_than<int32_t>, int32_t>   >(conf, aggr, less_eq_than<int32_t>(thres), conf.get_blocks_per_grid(), conf.device);
 
@@ -590,12 +591,12 @@ int main(int argc, char *argv[]){
     int32_t *dst;
     gpu(cudaMallocHost(&dst, sizeof(int32_t)*par.N));
 
-    launch_conf conf0{dim3(128), dim3(1024), 0, 0};
-    launch_conf conf1{dim3(128), dim3(1024), 0, 1};
+    launch_conf conf0{dim3(128), dim3(1024), 40960, 0};
+    launch_conf conf1{dim3(128), dim3(1024), 40960, 1};
     vector<launch_conf> confs{conf0, conf1};
     
-    pair<vector<generator *>, materializer *> p = create_select_all_pipeline(dst, a, par.N, confs);
-    // pair<vector<generator *>, materializer *> p = create_select_pipeline(dst, a, par.N, confs, par.thres);
+    // pair<vector<generator *>, materializer *> p = create_select_all_pipeline(dst, a, par.N, confs);
+    pair<vector<generator *>, materializer *> p = create_select_pipeline(dst, a, par.N, confs, par.thres);
     // pair<vector<generator *>, materializer *> p = create_sum_select_pipeline(dst, a, par.N, confs, par.thres);
     // pair<vector<generator *>, materializer *> p = create_count_join_select_pipeline(dst, a, par.N, s, par.M, confs);
 
@@ -628,6 +629,8 @@ int main(int argc, char *argv[]){
 
     cout << "Total: " << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
 
+
+    buffer_manager<int32_t>::destroy();
     return 0;
 
     vector<int32_t> results(omat->dst, omat->dst + omat->size);

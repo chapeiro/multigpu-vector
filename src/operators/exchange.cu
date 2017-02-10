@@ -207,16 +207,18 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
 
             buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(device);
 
-            buffer_pool_t::buffer_t::inspector_t from(strm2);
-            buffer_pool_t::buffer_t::inspector_t to  (strm2);
+            // buffer_pool_t::buffer_t::inspector_t to  (strm2);
 
                                                                                 // from.load(buff_l, false);
                                                                                 // to.load(buff, true);
 
             const int32_t * d;
             uint32_t        cnt;
-            if (get_device(buff_l) < 0){
+            cout << "get_device : " << buff_l << " = " << get_device(buff_l) << endl;
+            if (get_device(buff_l) >= 0){
+                buffer_pool_t::buffer_t::inspector_t from(strm2);
                 from.load(buff_l, true);
+
                 d   = from.data();
                 cnt = from.count();
             } else {
@@ -265,14 +267,11 @@ __host__ void consumer::consume(buffer_pool_t::buffer_t * buff_l){
             // cout << to.data() << " " << from.data() << " " << from2.data() << " " << to2.data() << endl;
             
             
-            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff, from.count(), prev_buff);
+            launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff, cnt, prev_buff);
 
-            if (get_device(buff_l) != device) {
-                buffer_manager<int32_t>::release_buffer(buff_l);
-                prev_buff = NULL;
-            } else {
-                prev_buff = buff;
-            }
+            buffer_manager<int32_t>::release_buffer(buff_l);
+
+            prev_buff = buff;
         } else {
             launch_consume_pipeline<<<dimGrid, dimBlock, shared_mem, strm>>>(parent.d, buff_l, prev_buff);
             prev_buff = buff_l;
@@ -362,6 +361,7 @@ __host__ void consumer::open(){
 __host__ void consumer::close(){
     for (auto &t: execs) t.join();
     if (device >= 0){
+        if (prev_buff) buffer_manager<int32_t>::release_buffer(prev_buff);
         gpu(cudaStreamSynchronize(strm2));
         gpu(cudaStreamSynchronize(strm));
         parent.d->close();

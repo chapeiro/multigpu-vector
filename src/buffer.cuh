@@ -31,14 +31,14 @@ public:
 
 public:
 
-    __host__ buffer(int device): cnt(0), device(device){
-        if (device >= 0){
-            set_device_on_scope d(device);
-            gpu(cudaMalloc(&data, size * sizeof(T)));
-        } else {
-            gpu(cudaMallocHost(&data, size * sizeof(T)));
-        }
-    }
+    // __host__ buffer(int device): cnt(0), device(device){
+    //     if (device >= 0){
+    //         set_device_on_scope d(device);
+    //         gpu(cudaMalloc(&data, size * sizeof(T)));
+    //     } else {
+    //         gpu(cudaMallocHost(&data, size * sizeof(T)));
+    //     }
+    // }
 
     __host__ buffer(T* data, int device): cnt(0), data(data), device(device){}
 
