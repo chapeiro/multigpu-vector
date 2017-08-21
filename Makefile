@@ -74,9 +74,29 @@ EXCLUDE_SOURCES+= src/main5.cu
 EXCLUDE_SOURCES+= src/main6.cu
 EXCLUDE_SOURCES+= src/main7.cu
 EXCLUDE_SOURCES+= src/main8.cu
+EXCLUDE_SOURCES+= src/main9.cu
+EXCLUDE_SOURCES+= src/main10.cu
+EXCLUDE_SOURCES+= src/main11.cu
 EXCLUDE_SOURCES+= src/output_composer.cu
 EXCLUDE_SOURCES+= src/operators/select.cu
 EXCLUDE_SOURCES+= src/operators/select2.cu
+
+
+
+# EXCLUDE_SOURCES+= src/operators/exchange.cu
+# EXCLUDE_SOURCES+= src/operators/gpu_to_cpu.cu
+EXCLUDE_SOURCES+= src/operators/materializer.cu
+# EXCLUDE_SOURCES+= src/operators/mem_move.cu
+EXCLUDE_SOURCES+= src/operators/operator.cu
+
+EXCLUDE_SOURCES+= src/operators/aggregation.cu
+# EXCLUDE_SOURCES+= src/operators/hashjoin.cu
+EXCLUDE_SOURCES+= src/operators/select3.cu
+EXCLUDE_SOURCES+= src/operators/select_v.cu
+# EXCLUDE_SOURCES+= src/operators/union_all.cu
+EXCLUDE_SOURCES+= src/operators/union_all_cpu.cu
+# EXCLUDE_SOURCES+= src/operators/split.cu
+
 
 CXX_SOURCESD= $(shell find $(SRC_ROOT) -name "*.cu")
 CXX_SOURCESD:= $(filter-out $(EXCLUDE_SOURCES),$(CXX_SOURCESD))

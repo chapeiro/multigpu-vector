@@ -1,58 +1,58 @@
 #include "mem_move.cuh"
 #include "../buffer_manager.cuh"
-#include <thread>
-#include <numaif.h>
+#include "../numa_utils.cuh"
 
-__host__ mem_move::mem_move(h_operator_t * parent): parent(parent){
+template<typename T>
+__host__ mem_move<T>::mem_move(h_operator<T> parent, int target_device): parent(parent), target_device(target_device), t(new thread([]{})){
     gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
 }
 
-__host__ void mem_move::consume(buffer_pool<int32_t>::buffer_t * data){
-    int dev = get_device(data);
 
-    if (dev >= 0){
+
+template<typename T>
+__host__ void mem_move<T>::consume(const T * __restrict__ src, cnt_t N, vid_t vid, cid_t cid){
+    int dev = get_device(src);
+
+    if (dev != target_device){
         set_device_on_scope d(dev);
-#ifndef NDEBUG
-        int rc =
-#endif
-        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &gpu_affinity[dev]);
-        assert(rc == 0);
-        // this_thread::yield();
 
+        if (dev >= 0) set_affinity_local_to_gpu(dev);
 
+        T * buff = buffer_manager<int32_t>::h_get_buffer(target_device);
 
-        buffer_t * buff = buffer_manager<int32_t>::get_buffer();
+        buffer_manager<T>::overwrite(buff, src, N, strm, true);
 
-            int status[1];
-            int ret_code;
-            status[0]=-1;
-            ret_code=move_pages(0 /*self memory */, 1, (void **) &buff->data, NULL, status, 0);
-            printf("mem_move:Memory at %p is at %d node (retcode %d) cpu: %d\n", buff->data, status[0], ret_code, sched_getcpu());
-
-        buffer_pool_t::buffer_t::inspector_t from(strm);
-        // buffer_pool_t::buffer_t::inspector_t to  (strm);
-
-        from.load(data, true);
-        // to.load  (buff, true );
-
-        // to.overwrite(from.data(), from.count(), false);
-
-        // to.save(buff, true);
-
-        buffer_manager<int32_t>::overwrite(buff, from.data(), from.count(), strm, true);
-
-
-        buffer_manager<int32_t>::release_buffer(data);
-
-        data = buff;
+        src = buff;
     }
-    parent->consume(data);
+
+    t->join();
+    delete t;
+
+    t = new thread([src, N, vid, cid, this](){ //what about src ? if no memcpy ? who will free it ?
+        parent.consume(src, N, vid, cid);
+    });
 }
 
-__host__ void mem_move::close(){
-    parent->close();
+template<typename T>
+template<typename Tw>
+__host__ void mem_move<T>::serialize_with(mem_move<Tw> *t){
+    gpu(cudaStreamSynchronize(strm));
+    gpu(cudaStreamDestroy(strm));
+    strm  = t->strm;
 }
 
-__host__ void mem_move::open(){
-    parent->open();
+template<typename T>
+__host__ void mem_move<T>::close(){
+    t->join();
+    delete t;
+    parent.close();
 }
+
+template<typename T>
+__host__ void mem_move<T>::open(){
+    parent.open();
+}
+
+template class mem_move<int32_t>;
+template __host__ void mem_move<int32_t>::serialize_with(mem_move<int32_t> *);
+template __host__ void mem_move<int32_t>::serialize_with(mem_move<sel_t  > *);

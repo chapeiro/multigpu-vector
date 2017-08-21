@@ -7,10 +7,25 @@
 #include <utmpx.h>
 #include <unistd.h>
 #include <numaif.h>
+#include <tuple>
+#include <thrust/tuple.h>
 
 #ifndef DEFAULT_BUFF_CAP
-#define DEFAULT_BUFF_CAP (4*1024*1024)
+#define DEFAULT_BUFF_CAP (16*1024*1024)
 #endif
+
+#ifndef WARPSIZE
+#define WARPSIZE (32)
+#endif
+
+typedef size_t   vid_t;
+typedef uint32_t cid_t;
+typedef uint32_t sel_t;
+typedef uint32_t cnt_t;
+
+constexpr cnt_t    vector_size   =    32*4*WARPSIZE;
+constexpr cnt_t    h_vector_size = DEFAULT_BUFF_CAP;
+constexpr uint32_t warp_size     =         WARPSIZE;
 
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -25,8 +40,6 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file, in
     }
 }
 
-#define WARPSIZE (32)
-
 // #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
 #define BRDCSTMEM(blockDim) ((blockDim.x * blockDim.y)/ WARPSIZE)
 // #else
@@ -39,7 +52,7 @@ private:
 public:
     inline set_device_on_scope(int set){
         gpu(cudaGetDevice(&device));
-        gpu(cudaSetDevice(set));
+        if (set >= 0) gpu(cudaSetDevice(set));
     }
 
     inline ~set_device_on_scope(){
@@ -207,7 +220,7 @@ struct launch_conf{
     }
 
     int total_num_of_warps() const{
-        return get_threads_per_block() * get_warps_per_block();
+        return get_blocks_per_grid() * get_warps_per_block();
     }
 };
 
@@ -217,8 +230,12 @@ __device__ __forceinline__ int get_laneid(){
     return laneid;
 }
 
+__device__ __forceinline__ int get_threadid(){
+    return threadIdx.x + blockDim.x * threadIdx.y + blockDim.x * blockDim.y * threadIdx.z;
+}
+
 __device__ __forceinline__ int get_warpid(){
-    return (threadIdx.x + blockDim.x * threadIdx.y + blockDim.x * blockDim.y * threadIdx.z) / warpSize;
+    return get_threadid() / warpSize;
 }
 
 __device__ __forceinline__ int get_blockid(){
@@ -241,8 +258,16 @@ __device__ __forceinline__ int get_global_warpid(){
     return get_blockid() * get_warps_per_block() + get_warpid();
 }
 
+__device__ __forceinline__ int get_global_thread_id(){
+    return get_blockid() * get_threads_per_block() + get_threadid();
+}
+
 __device__ __forceinline__ int get_total_num_of_warps(){
     return get_warps_per_block() * get_blocks_per_grid();
+}
+
+__device__ __forceinline__ int get_total_num_of_threads(){
+    return get_threads_per_block() * get_blocks_per_grid();
 }
 
 __device__ __host__ int __forceinline__ find_nth_set_bit(uint32_t c1, unsigned int n){
@@ -370,5 +395,84 @@ __host__ typename std::result_of<Operator(T, Args...)>::type run_on_device(T obj
 //     }
 // };
 
+// Based on: http://stackoverflow.com/a/10766422/1237824
+namespace tuple_expansion{
+    using namespace std;
+    template <typename F, typename Tuple, bool Done, int Total, int... N>
+    struct call_impl{
+        __host__ __device__ static void call(F f, Tuple &&t){
+            call_impl<F, Tuple, Total == 1 + sizeof...(N), Total, N..., sizeof...(N)>::call(f, std::forward<Tuple>(t));
+        }
+    };
+
+    template <typename F, typename Tuple, int Total, int... N>
+    struct call_impl<F, Tuple, true, Total, N...>{
+        __host__ __device__ static void call(F f, Tuple && t){
+            f(get<N>(std::forward<Tuple>(t))...);
+        }
+    };
+
+    template <typename F, typename T, typename Tuple, bool Done, int Total, int... N>
+    struct call_impl_obj{
+        __host__ __device__ static void call(F f, T * obj, Tuple &&t){
+            call_impl_obj<F, T, Tuple, Total == 1 + sizeof...(N), Total, N..., sizeof...(N)>::call(f, obj, std::forward<Tuple>(t));
+        }
+    };
+
+    template <typename F, typename T, typename Tuple, int Total, int... N>
+    struct call_impl_obj<F, T, Tuple, true, Total, N...>{
+        __host__ __device__ static void call(F f, T * obj, Tuple && t){
+            (obj->*f)(get<N>(std::forward<Tuple>(t))...);
+        }
+    };
+}
+
+template <typename F, typename Tuple>
+__host__ __device__ void call(F f, Tuple && t){
+    typedef typename std::decay<Tuple>::type ttype;
+    tuple_expansion::call_impl<F, Tuple, 0 == std::tuple_size<ttype>::value, std::tuple_size<ttype>::value>::call(f, std::forward<Tuple>(t));
+}
+
+template <typename F, typename T, typename Tuple>
+__host__ __device__ void call(F f, T * obj, Tuple && t){
+    typedef typename std::decay<Tuple>::type ttype;
+    tuple_expansion::call_impl_obj<F, T, Tuple, 0 == std::tuple_size<ttype>::value, std::tuple_size<ttype>::value>::call(f, obj, std::forward<Tuple>(t));
+}
+
+// template <typename... Ttuple, typename F, typename Tuple>
+// __host__ __device__ void call2(F f, Tuple && t){
+//     typedef typename std::decay<Tuple>::type ttype;
+//     tuple_expansion::call_impl<F, Tuple, 0 == sizeof...(Ttuple), sizeof...(Ttuple)>::call(f, std::forward<Tuple>(t));
+// }
+
+// template <typename... Ttuple, typename F, typename T, typename Tuple>
+// __host__ __device__ void call2(F f, T * obj, Tuple && t, cnt_t N, vid_t vid, cid_t cid){
+//     typedef typename std::decay<Tuple>::type ttype;
+//     tuple_expansion::call_impl_obj<F, T, Tuple, 0 == sizeof...(Ttuple), sizeof...(Ttuple)>::call(f, obj, std::forward<Tuple>(t));
+// }
+
+// http://stackoverflow.com/a/17426611/1237824
+// using aliases for cleaner syntax
+template<class T> using Invoke = typename T::type;
+
+template<unsigned...> struct seq{ using type = seq; };
+
+template<class S1, class S2> struct concat;
+
+template<unsigned... I1, unsigned... I2>
+struct concat<seq<I1...>, seq<I2...>>
+  : seq<I1..., (sizeof...(I1)+I2)...>{};
+
+template<class S1, class S2>
+using Concat = Invoke<concat<S1, S2>>;
+
+template<unsigned N> struct gen_seq;
+template<unsigned N> using GenSeq = Invoke<gen_seq<N>>;
+
+template<unsigned N>
+struct gen_seq : Concat<GenSeq<N/2>, GenSeq<N - N/2>>{};
+
+template<> struct gen_seq<0> : seq<>{};
+template<> struct gen_seq<1> : seq<0>{};
 
 #endif /* COMMON_CUH_ */

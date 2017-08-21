@@ -1,0 +1,32 @@
+210μs / kernel invocation for sum(select)
+
+220μs / kernel invocation for build_HT(select)
+
+310-500 μs / kernel invocation for select
+
+
+
+1G: count(join(A, filt(50% A))) 
+    GPU: 5395760ms
+    CPU: >3793 min      (simple implementation of same code for CPU)
+    SpeedUp : > 42x
+
+
+
+----> 16G entries/column query : sum([(a[i] == 2 ? b[i] : 0) for all i])
+
+N: 17179869184 M: 16777216 Threshold: 5000 SRC location : host
+Warning: P2P disabled for : 0->1
+Warning: P2P disabled for : 1->0
+Memory at 0x10616400000 is at 1 node (retcode 0, cpu 33)
+Memory at 0x10516400000 is at 0 node (retcode 0, cpu 24)
+------------
+------------
+Trand: 187208ms
+Aggr : 858983459
+T: 37933ms                      <----- host
+12262ms
+12274ms
+858983459 T: 12277ms            <----- single GPU
+
+

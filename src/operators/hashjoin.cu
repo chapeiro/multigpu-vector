@@ -10,96 +10,155 @@ __device__ uint32_t hashMurmur(uint32_t x){
     return x;
 }
 
-// NOTE: do not use this as atomicExch is loopless and has better guarantees when val is the same for multiple threads
-__device__ int32_t atomicSet(int32_t* address, int32_t val) {
-    int32_t old = *address;
-    int32_t expected;
-    do {
-        expected = old;
-        old = atomicCAS(address, expected, val);
-    } while (expected != old);
-    return old;
+template<typename T>
+__device__ void hashjoin_builder<T>::at_open(){}
+
+template<typename T>
+__host__ hashjoin_builder<T>::hashjoin_builder(int32_t log_table_size, volatile int32_t * first, volatile node<T> * next
+#ifndef NDEBUG
+                                , int32_t max_size
+#endif
+    ):
+        index(0), first(first), next(next), log_table_size(log_table_size)
+#ifndef NDEBUG
+                                , max_size(max_size)
+#endif
+        {}
+
+template<typename T>
+__device__ void hashjoin_builder<T>::at_close(){
+    if (get_global_warpid() == 0 && get_laneid() == 0) printf("%d\n", index);
 }
 
-template<size_t warp_size>
-__device__ void hashjoin_builder<warp_size>::at_open(){}
+template<typename T>
+__device__ void hashjoin_builder<T>::consume_open(){}
 
-template<size_t warp_size>
-__host__ hashjoin_builder<warp_size>::hashjoin_builder(int32_t log_table_size, int32_t * first, int32_t * next, int32_t * values, int dev):
-        index(0), first(first), next(next), values(values), log_table_size(log_table_size){}
+template<typename T>
+__device__ void hashjoin_builder<T>::consume_close(){}
 
-template<size_t warp_size>
-__device__ void hashjoin_builder<warp_size>::at_close(){}
+// template<typename T>
+// __device__ void hashjoin_builder<T>::consume_warp(const T * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__ {
+//     const  int32_t laneid = get_laneid();
+//     const uint32_t mask   = ((1 << log_table_size) - 1);
 
-template<size_t warp_size>
-__device__ void hashjoin_builder<warp_size>::consume_open(){}
+//     // const int32_t * first;
+//     // const node<T> * next;
 
-template<size_t warp_size>
-__device__ void hashjoin_builder<warp_size>::consume_close(){}
+//     vid_t offset;
+//     if (laneid == 0) offset = atomicAdd(&index, (vid_t) N);
+//     offset = brdcst(offset, 0);
 
-template<size_t warp_size>
-__device__ void hashjoin_builder<warp_size>::consume_warp(const int32_t *src, unsigned int N){
-    const int32_t laneid = get_laneid();
+//     for (uint32_t i = 0 ; i < vector_size ; i += 4*warp_size){
+//         vec4 s = reinterpret_cast<const vec4 *>(src)[i/4 + laneid];
+        
+//         #pragma unroll
+//         for (uint32_t k = 0 ; k < 4 ; ++k) {
+//             const uint32_t ind = i + 4*laneid + k;
+//             if (ind < N){
+//                 uint32_t bucket = hashMurmur(s.i[k]) & mask;
 
-    int32_t offset;
-    if (laneid == 0) offset = atomicAdd(&index, N);
+//                 node<T> tmp;
+//                 tmp.next           = atomicExch(first + bucket, offset + ind);
+//                 tmp.data           = s.i[k];
+//                 tmp.oid            = ind + vid;
+
+//                 next[offset + ind] = tmp;
+//                 // assert(offset + ind < max_size);
+//             }
+//         }
+//     }
+// }
+
+template<typename T>
+__device__ void hashjoin_builder<T>::consume_warp(const T * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__ {
+    const  int32_t laneid = get_laneid();
+    const uint32_t mask   = ((1 << log_table_size) - 1);
+
+    volatile int32_t * first = this->first;
+    node<T> * next  = (node<T> *) this->next ;
+
+    vid_t offset;
+    if (laneid == 0) offset = atomicAdd(&index, (vid_t) N);
     offset = brdcst(offset, 0);
 
-    #pragma unroll
-    for (int k = 0 ; k < 4 ; ++k){
-        const uint32_t ind = k*warp_size + laneid;
-        if (ind < N) {
-            uint32_t bucket      = hashMurmur(src[ind]) & ((1 << log_table_size) - 1);
+    for (uint32_t i = 0 ; i < vector_size ; i += warp_size){
+        // vec4 s = reinterpret_cast<const vec4 *>(src)[i/4 + laneid];
 
-            next  [((offset + ind) << 1)  ] = atomicExch(first + bucket, offset + ind);
-            next  [((offset + ind) << 1)+1] = src[ind];
+        const uint32_t ind = i + laneid;
+        if (ind < N){
+            uint32_t bucket = hashMurmur(src[ind]) & mask;
 
-            // values[offset + ind] = src[ind];
+            node<T> tmp;
+            tmp.next           = atomicExch((int32_t *) (first + bucket), offset + ind);
+            tmp.data           = src[ind];
+            tmp.oid            = ind + vid;
+
+            next[offset + ind] = tmp;
+            assert(offset + ind < max_size);
         }
     }
 }
 
-template<size_t warp_size>
-__host__ hashjoin<warp_size>::hashjoin(d_operator_t * parent, int32_t log_table_size, int32_t max_size, const launch_conf &conf):
-        parent(parent), log_table_size(log_table_size), res(0){
+template<typename T>
+__host__ void hashjoin_builder<T>::before_open(){}
+
+template<typename T>
+__host__ void hashjoin_builder<T>::after_close(){}
+
+
+
+
+
+
+
+
+
+template<typename Teq, typename Tpayload>
+__host__ hashjoin<Teq, Tpayload>::hashjoin(d_operator<int32_t> parent, int32_t log_table_size, int32_t max_size, const launch_conf &conf):
+        parent(parent), log_table_size(log_table_size){
     set_device_on_scope d(conf.device);
 
-    gpu(cudaMalloc(&first , (1 << log_table_size) * sizeof(int32_t)));
-    gpu(cudaMalloc(&next  ,            2 * max_size  * sizeof(int32_t)));
-    // gpu(cudaMalloc(&values,             max_size  * sizeof(int32_t)));
+    gpu(cudaMalloc(&first ,    (1 << log_table_size) * sizeof(  int32_t)));
+    gpu(cudaMalloc(&next  ,      ((size_t) max_size) * sizeof(node<Teq>)));
 
     //carefull, this works because all bytes of -1 are the same
-    gpu(cudaMemset(first, -1, (1 << log_table_size) * sizeof(int32_t)));
+    gpu(cudaMemset((int32_t *) first, -1,  (1 << log_table_size) * sizeof(int32_t)));
 
-    builder = d_operator_t::create<hashjoin_builder<warp_size>>(conf, log_table_size, first, next, values, conf.device);
+    out[0]  = 0;
+    out[1]  = 0;
+    builder = d_operator<Teq>(conf, cuda_new<hashjoin_builder<Teq>>(conf.device, log_table_size, first, next
+#ifndef NDEBUG
+                                , max_size
+#endif
+                                ));
 }
 
-template<size_t warp_size>
-__host__ hashjoin<warp_size>::~hashjoin(){
-    gpu(cudaFree(first ));
-    gpu(cudaFree(next  ));
-    gpu(cudaFree(values));
+template<typename Teq, typename Tpayload>
+__host__ hashjoin<Teq, Tpayload>::~hashjoin(){
+    gpu(cudaFree((int32_t   *) first ));
+    gpu(cudaFree((node<Teq> *) next  ));
 }
 
-template<size_t warp_size>
-__device__ void hashjoin<warp_size>::at_open(){}
+template<typename Teq, typename Tpayload>
+__device__ void hashjoin<Teq, Tpayload>::at_open(){}
 
-template<size_t warp_size>
-__device__ void hashjoin<warp_size>::at_close(){
-    if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0){
-        parent->consume_open();
-        __syncthreads();
-        if (get_warpid() == 0) parent->consume_warp(&res, 1);
-        __syncthreads();
-        parent->consume_close();
+template<typename Teq, typename Tpayload>
+__device__ void hashjoin<Teq, Tpayload>::at_close(){
+    if (get_blockid() == 0){
+        parent.consume_open();
+        if (get_warpid() == 0) {
+            if (get_laneid() == 0) printf("%d %d %d\n", out[0], out[1], out[2]);
+            parent.consume_warp(out, 3, 0, 0);
+        }
+        parent.consume_close();
     }
 }
 
-template<size_t warp_size>
-__device__ void hashjoin<warp_size>::consume_open(){}
+template<typename Teq, typename Tpayload>
+__device__ void hashjoin<Teq, Tpayload>::consume_open(){}
 
-template<size_t warp_size>
-__device__ void hashjoin<warp_size>::consume_close(){}
+template<typename Teq, typename Tpayload>
+__device__ void hashjoin<Teq, Tpayload>::consume_close(){}
 
 // template<size_t warp_size>
 // __device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned int N){
@@ -131,36 +190,54 @@ __device__ void hashjoin<warp_size>::consume_close(){}
 //     atomicAdd(&res, r);
 // }
 
-template<size_t warp_size>
-__device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned int N){
+
+template<typename Teq, typename Tpayload>
+__host__ d_operator<Teq> hashjoin<Teq, Tpayload>::get_builder(){
+    d_operator<Teq> hjbuilder;
+    gpu(cudaMemcpy(&hjbuilder, &builder, sizeof(d_operator<Teq>), cudaMemcpyDefault));
+    return hjbuilder;
+}
+
+template<typename Teq, typename Tpayload>
+template<typename Tt, typename>
+__device__ void hashjoin<Teq, Tpayload>::consume_warp(const Teq * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__{
     const int32_t laneid = get_laneid();
+    const uint32_t mask  = ((1 << log_table_size) - 1);
 
-    vec4 x;
-    vec4 curr;
     int32_t r = 0;
+    int32_t r2 = 0;
 
-    #pragma unroll
-    for (int k = 0 ; k < 4 ; ++k) x.i[k]    = src[k * warp_size + laneid];
+    for (uint32_t i = 0 ; i < vector_size ; i += 4*warp_size){
+        vec4 x = reinterpret_cast<const vec4 *>(src)[i/4 + laneid];
 
-    #pragma unroll
-    for (int k = 0 ; k < 4 ; ++k) curr.i[k] = (k*warp_size + laneid < N) ? first[hashMurmur(x.i[k]) & ((1 << log_table_size) - 1)] : -1;
-
-    while (curr.i[0] >= 0 || curr.i[1] >= 0 || curr.i[2] >= 0 || curr.i[3] >= 0){
+        vec4 curr;
         #pragma unroll
-        for (int k = 0 ; k < 4 ; ++k){
-            if (curr.i[k] >= 0){
-                int32_t t = curr.i[k] << 1;
-                int32_t n = next[t];
+        for (int k = 0 ; k < 4 ; ++k) curr.i[k] = (i + 4*laneid + k < N) ? first[hashMurmur(x.i[k]) & mask] : -1;
 
-                r        += next[t + 1] == x.i[k];
-                curr.i[k] = n;
-                // if (next[(curr.i[k] << 1) + 1] == x.i[k]) ++r;//atomicAdd(&res, 1);
-                // // ++r;
-                // curr.i[k] = next[curr.i[k] << 1];// == x.i[k];
+        while (curr.i[0] >= 0 || curr.i[1] >= 0 || curr.i[2] >= 0 || curr.i[3] >= 0){
+            #pragma unroll
+            for (int k = 0 ; k < 4 ; ++k){
+                if (curr.i[k] >= 0){
+                    node<Teq> tmp(next[curr.i[k]]);
+
+                    if (tmp.data == x.i[k]) {
+                        r += x.i[k];
+                        ++r2;
+                    }
+
+                    assert(curr.i[k] != tmp.next);
+                    curr.i[k] = tmp.next;
+                }
             }
         }
     }
-    atomicAdd(&res, r);
+    // r = N;
+    // if (laneid == 0) atomicAdd(out, r);
+
+    atomicAdd(out, r);
+    if (laneid == 0) atomicAdd(out+1, N);
+    atomicAdd(out+2, r2);
+    // if (laneid == 0) printf("                                               %d %d %d\n", out[0], out[1], out[2]);
 
     // #pragma unroll
     // for (int k = 0 ; k < 4 ; ++k){
@@ -181,26 +258,83 @@ __device__ void hashjoin<warp_size>::consume_warp(const int32_t *src, unsigned i
     // }
 }
 
-template<size_t warp_size>
-__host__ void hashjoin<warp_size>::before_open(){
-    decltype(this->parent) p;
-    gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
-    p->open();
+template<typename Teq, typename Tpayload>
+template<typename Tt, typename>
+__device__ void hashjoin<Teq, Tpayload>::consume_warp(const Teq * __restrict__ src, const Tpayload * __restrict__ payload, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+    static_assert(is_same<Tpayload, int32_t>::value, "not implemented");
+    const int32_t laneid = get_laneid();
+    const uint32_t mask  = ((1 << log_table_size) - 1);
+
+    int32_t r = 0;
+    int32_t r2 = 0;
+
+    for (uint32_t i = 0 ; i < vector_size ; i += 4*warp_size){
+        vec4 x = reinterpret_cast<const vec4 *>(src    )[i/4 + laneid];
+        vec4 p = reinterpret_cast<const vec4 *>(payload)[i/4 + laneid];
+
+        // if (i == 0 && laneid == 0 && src[0] >= 10000000) printf("%p %d %d %d\n", this, src[0], payload[0], cid);
+
+        vec4 curr;
+        #pragma unroll
+        for (int k = 0 ; k < 4 ; ++k) curr.i[k] = (i + 4*laneid + k < N) ? first[hashMurmur(x.i[k]) & mask] : -1;
+
+        while (curr.i[0] >= 0 || curr.i[1] >= 0 || curr.i[2] >= 0 || curr.i[3] >= 0){
+            #pragma unroll
+            for (int k = 0 ; k < 4 ; ++k){
+                if (curr.i[k] >= 0){
+                    node<Teq> tmp(next[curr.i[k]]);
+
+                    if (tmp.data == x.i[k]) {
+                        r += p.i[k];
+                        ++r2;
+                    }
+
+                    assert(curr.i[k] != tmp.next);
+                    curr.i[k] = tmp.next;
+                }
+            }
+        }
+    }
+    // r = N;
+    // if (laneid == 0) atomicAdd(out, r);
+
+    atomicAdd(out, r);
+    if (laneid == 0) atomicAdd(out+1, N);
+    atomicAdd(out+2, r2);
+    // if (laneid == 0) printf("                                               %d %d %d\n", out[0], out[1], out[2]);
+
+    // #pragma unroll
+    // for (int k = 0 ; k < 4 ; ++k){
+    //     const uint32_t ind = k*warp_size + laneid;
+    //     int32_t current = -1;
+    //     int32_t probe;
+    //     uint32_t bucket;
+    //     if (ind < N) {
+    //         probe   = src[ind];
+    //         bucket  = hashMurmur(probe) & ((1 << log_table_size) - 1);
+
+    //         current = first[bucket];
+    //         while (current >= 0){
+    //             if (values[current] == probe) atomicAdd(&res, 1);
+    //             current = next[current];
+    //         }
+    //     }
+    // }
 }
 
-template<size_t warp_size>
-__host__ void hashjoin<warp_size>::after_close(){
-    decltype(this->parent) p;
-    gpu(cudaMemcpy(&p, &(this->parent), sizeof(decltype(this->parent)), cudaMemcpyDefault));
-    p->close();
+template<typename Teq, typename Tpayload>
+__host__ void hashjoin<Teq, Tpayload>::before_open(){
+    parent.open();
 }
 
-template<size_t warp_size>
-__host__ void hashjoin_builder<warp_size>::before_open(){}
+template<typename Teq, typename Tpayload>
+__host__ void hashjoin<Teq, Tpayload>::after_close(){
+    parent.close();
+}
 
-template<size_t warp_size>
-__host__ void hashjoin_builder<warp_size>::after_close(){}
 
-
-template class hashjoin_builder<>;
-template class hashjoin<>;
+template class hashjoin_builder<int32_t>;
+template class hashjoin<int32_t>;
+template __device__ void hashjoin<int32_t>::consume_warp<>(const int32_t * __restrict__, cnt_t, vid_t, cid_t) __restrict__;
+template class hashjoin<int32_t, int32_t>;
+template __device__ void hashjoin<int32_t, int32_t>::consume_warp<>(const int32_t * __restrict__, const int32_t * __restrict__, cnt_t, vid_t, cid_t) __restrict__;

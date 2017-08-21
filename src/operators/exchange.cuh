@@ -2,101 +2,57 @@
 #define EXCHANGE_CUH_
 
 #include <vector>
+#include <queue>
 #include <thread>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
-#include "operator.cuh"
-#include "../buffer_pool.cuh"
+#include <unordered_map>
+#include "h_operator.cuh"
 
-// typedef void (Operator::*con)(buffer_pool<int32_t>::buffer_t *);
-
-typedef buffer_pool<int32_t> buffer_pool_t;
-
-
-class producer{
-public:
-    typedef buffer_pool_t::buffer_t buffer_t;
+struct router{
 private:
-    buffer_pool_t * outpool;
-    exchange      * exc;
-
+    mutex                       guard;
+    unordered_map<vid_t, int>   route_table;
 
 public:
-    __host__ producer(buffer_pool_t * outpool): outpool(outpool), exc(NULL){
-        if (outpool) outpool->register_producer(this);
+    template<typename... T, typename F>
+    int get_mapping(const T *... src, cnt_t N, vid_t vid, cid_t cid, F pol){
+        lock_guard<mutex> g(guard);
+        auto s = route_table.find(vid);
+        if (s != route_table.end()) return s->second;
+        int policy = pol(src..., N, vid, cid);
+        route_table.emplace(make_pair(vid, policy));
+        return policy;
     }
-    __host__ producer(exchange      * exc)    : outpool(NULL   ), exc(exc ){}
-
-    __host__ ~producer();
-
-    __host__ __device__ void open(){};
-    __host__ __device__ void close();
-
-    __host__ __device__ void consume(buffer_t * data);
 };
 
-class consumer{
-public:
-    typedef buffer_pool_t::buffer_t buffer_t;
-private:
-    int             device;
-    int             shared_mem;
-    cudaStream_t    strm;
-    cudaStream_t    strm2;
-    dim3            dimGrid;
-    dim3            dimBlock;
-    p_operator_t    parent;
-    vector<thread>  execs;
-    buffer_t      * prev_buff;
-    
-    int32_t * h_data_in[2];
-    int32_t * d_data_in[2];
-    cudaStream_t strmt[2];
-    int i;
-public:
-    __host__ consumer(p_operator_t parent, dim3 dimGrid, dim3 dimBlock, int shared_mem);
-
-    __host__ void open();
-
-    __host__ void consume(buffer_t * data);
-
-    __host__ void close();
-
-    __host__ ~consumer();
-};
-
-
-
-
+template<typename... T>
 class exchange{
-public:
-    typedef buffer_pool<int32_t> buffer_pool_t;
+private:
+    vector<thread>                                                  firers ;
+    vector<h_operator<T...>>                                        parents;
+
+    atomic<int>                                                     remaining_producers;
+
+    queue<tuple<tuple<const T *...>, cnt_t, vid_t, cid_t>>         *ready_pool;
+    mutex                                                          *ready_pool_mutex;
+    condition_variable                                             *ready_pool_cv;
+
+    router                                                         *r;
 
 public:
-    vector<thread>                      firers;
-    
-    atomic<int>                         remaining_producers;
+    exchange(const vector<h_operator<T...>> &parents, router *r);
 
-    vector<buffer_pool_t::buffer_t *>   ready_pool;
-    mutex                               ready_pool_mutex;
-    condition_variable                  ready_pool_cv;
-
-    __host__ void poll(buffer_pool_t * target);
-    __host__ void fire(consumer *cons);
-public:
-    exchange(const vector<p_operator_t> &parents,
-                const vector<launch_conf> &parent_conf);
-
-public: //FIXME: friends...
-    __host__ void set_ready(buffer_pool_t::buffer_t * buff);
-    __host__ buffer_pool_t::buffer_t * get_ready();
+private:
+    __host__ void fire(h_operator<T...> op, int i);
+    __host__ bool get_ready(tuple<tuple<const T *...>, cnt_t, vid_t, cid_t> &p, int i);
     __host__ void producer_ended();
 
 public:
     __host__ void open();
 
-    __host__ void consume(buffer_t * data);
+    __host__ void consume(const T * ... src, cnt_t N, vid_t vid, cid_t cid);
 
     __host__ void close();
 

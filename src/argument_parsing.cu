@@ -7,14 +7,18 @@ using namespace std;
 
 
 std::ostream& operator<<(std::ostream& out, const params_t& p){
-    out << "N: " << p.N << " M: " << p.M << " Threshold: " << p.thres;
+    out <<  "N: "               << p.N;
+    out << " M: "               << p.M;
+    out << " Threshold: "       << p.thres;
+    out << " GPUs: "            << p.gpus;
+    out << " SRC location : "   << (p.src_at_device ? "dev" : "host");
     return out;
 }
 
 
 int parse_args(int argc, char *argv[], params_t &params){
     int c;
-    while ((c = getopt (argc, argv, "N:M:t:")) != -1){
+    while ((c = getopt (argc, argv, "N:M:t:dg:")) != -1){
         switch (c){
             case 'N':
                 {
@@ -94,6 +98,17 @@ int parse_args(int argc, char *argv[], params_t &params){
                     params.M = val;
                     break;
                 }
+            case 'g':
+                {
+                    char *end;
+                    int32_t value = strtol(optarg, &end, 10); 
+                    if (end == optarg || *end != '\0' || errno == ERANGE){
+                        cout << "Invalid entry for option -g: " << optarg << endl;
+                        return -2;
+                    }
+                    params.gpus = value;
+                    break;
+                }
             case 't':
                 {
                     char *end;
@@ -105,6 +120,9 @@ int parse_args(int argc, char *argv[], params_t &params){
                     params.thres = value;
                     break;
                 }
+            case 'd':
+                params.src_at_device = true;
+                break;
             case '?':
                 if (optopt == 'N')
                     fprintf (stderr, "Option -%c requires an argument.\n", optopt);

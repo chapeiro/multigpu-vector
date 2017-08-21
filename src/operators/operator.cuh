@@ -3,10 +3,10 @@
 
 #include "../../external/variant/variant/variant.h"
 #include "../buffer_pool.cuh"
+#include "d_operator.cuh"
 
 using namespace std;
 
-class generator;
 class materializer;
 class union_all_cpu;
 class exchange;
@@ -27,7 +27,7 @@ template<size_t warp_size, typename T>
 class split;
 template<size_t warp_size, typename T>
 class union_all;
-class mem_move;
+// class mem_move;
 typedef buffer_pool<int32_t> buffer_pool_t;
 
 typedef buffer_pool_t::buffer_t buffer_t;
@@ -87,7 +87,7 @@ public:
 
 class h_operator_t{
 private:
-    typedef variant::variant<union_all_cpu *, generator *, materializer *, producer *, exchange *, mem_move *> op_t;
+    typedef variant::variant<union_all_cpu *, materializer *, producer *, exchange *> op_t;
     op_t op;
 
     template<typename Op, typename... Args>

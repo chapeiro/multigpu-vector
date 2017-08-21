@@ -1,7 +1,6 @@
 #include "operator.cuh"
 
 #include "aggregation.cuh"
-#include "generators.cuh"
 #include "materializer.cuh"
 #include "exchange.cuh"
 #include "select3.cuh"
@@ -10,7 +9,7 @@
 #include "split.cuh"
 #include "union_all.cuh"
 #include "union_all_cpu.cuh"
-#include "mem_move.cuh"
+// #include "mem_move.cuh"
 
 class open_op{
 public:

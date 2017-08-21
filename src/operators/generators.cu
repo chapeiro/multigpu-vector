@@ -9,15 +9,15 @@
 
 using namespace std;
 
-__host__ generator::generator(h_operator_t * parent, int32_t *src, size_t N):
-        parent(parent), src(src), N(N){
+__host__ generator::generator(h_operator<int32_t> parent, int32_t *src, size_t N, cid_t cid):
+        parent(parent), src(src), N(N), cid(cid){
     // parent->open();
 
     // cudaStream_t strm;
-    gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
+    // gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
     
     // buffer_pool<int32_t>::buffer_t ** buff_ret;
-    gpu(cudaMallocHost(&buff_ret, sizeof(buffer_pool<int32_t>::buffer_t *)));
+    // gpu(cudaMallocHost(&buff_ret, sizeof(buffer_pool<int32_t>::buffer_t *)));
 
     // buffer_pool<int32_t>::buffer_t::inspector_t insp(strm);
     // while (N > 0){
@@ -44,54 +44,55 @@ __host__ generator::generator(h_operator_t * parent, int32_t *src, size_t N):
     // parent->close();
 }
 
-__host__ void generator::open(){
-    parent->open();
-}
+__host__ void generator::open(){}
 
-__host__ void generator::consume(buffer_pool<int32_t>::buffer_t * data){
+__host__ void generator::consume(cnt_t N, vid_t vid, cid_t cid){
     assert(false);
 }
 
 __host__ void generator::close(){
+    parent.open();
     {
-        buffer_pool<int32_t>::buffer_t::inspector_t insp(strm);
+        vid_t vid = 0;
+        // buffer_pool<int32_t>::buffer_t::inspector_t insp(strm);
         auto start = chrono::system_clock::now();
         while (N > 0){
-            buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::get_buffer();
+            // buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::get_buffer();
 
             // buffer_pool<int32_t>::buffer_t * buff = buffer_manager<int32_t>::h_get_buffer(1);
 
-            size_t m = min(N, (size_t) buffer_pool<int32_t>::buffer_t::capacity());
+            size_t m = min(N, (size_t) h_vector_size);
 
             // insp.load(buff, true);
             // insp.overwrite(src, m, false);
 
             // insp.save(buff, true);
             // memcpy(buff->data, src, m * sizeof(int32_t));
-            buff->data = src;
-            buff->cnt  = m;
+            // buff->data = src;
+            // buff->cnt  = m;
             
             assert(m > 0);
-            parent->consume(buff);
+            parent.consume(src, m, vid, cid);
 
+            vid += m;
             N   -= m;
             src += m;
         }
         auto end   = chrono::system_clock::now();
         cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms" << endl;
     }
-    {
-        auto start = chrono::system_clock::now();
-        gpu(cudaStreamSynchronize(strm));
-        auto end   = chrono::system_clock::now();
-        cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms." << endl;
-    }
-    parent->close();
+    // {
+    //     auto start = chrono::system_clock::now();
+    //     // gpu(cudaStreamSynchronize(strm));
+    //     auto end   = chrono::system_clock::now();
+    //     cout << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms." << endl;
+    // }
+    parent.close();
 }
 
 __host__ generator::~generator(){
-    gpu(cudaStreamDestroy(strm));
-    gpu(cudaFreeHost(buff_ret));
+    // gpu(cudaStreamDestroy(strm));
+    // gpu(cudaFreeHost(buff_ret));
 }
 
 
