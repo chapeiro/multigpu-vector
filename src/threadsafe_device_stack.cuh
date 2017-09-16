@@ -52,7 +52,7 @@ public:
         assert(cnt < size);
         data[cnt++] = v;
 
-        lock = 0;
+        lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
     }
 
     __device__ bool try_pop(T *ret){
@@ -61,13 +61,13 @@ public:
         if (atomicCAS((int *) &lock, 0, 1) != 0) return false;
 
         if (cnt == 0) {
-            lock = 0;
+            lock = 0;   //FIXME: atomicExch() is probably needed here. This should have undef behavior
             return false;
         }
 
         *ret = data[--cnt];
 
-        lock = 0;
+        lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
 
         return true;
     }

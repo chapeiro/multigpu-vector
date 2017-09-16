@@ -1,7 +1,8 @@
 #ifndef NUMA_UTILS_CUH_
 #define NUMA_UTILS_CUH_
 
-#include "buffer_manager.cuh"
+// #include "buffer_manager.cuh"
+#include "common/gpu/gpu-common.hpp"
 #include <thread>
 #include <numaif.h>
 #include <numa.h>
@@ -14,9 +15,6 @@
 #define numa_assert(x) ((void)0)
 #endif
 
-extern int                                                 cpu_cnt;
-extern cpu_set_t                                          *gpu_affinity;
-extern cpu_set_t                                          *cpu_numa_affinity;
 
 void inline set_affinity(cpu_set_t *aff){
 #ifndef NNUMA
@@ -46,10 +44,10 @@ T * malloc_host_local_to_gpu(size_t size, int device){
 
     T      *mem = (T *) numa_alloc_onnode(sizeof(T)*size, numa_node_of_gpu(device));
     assert(mem);
-    gpu(cudaHostRegister(mem, sizeof(T)*size, 0));
+    gpu_run(cudaHostRegister(mem, sizeof(T)*size, 0));
 
     // T * mem;
-    // gpu(cudaMallocHost(&mem, sizeof(T)*size));
+    // gpu_run(cudaMallocHost(&mem, sizeof(T)*size));
 
     return mem;
 }
@@ -59,16 +57,16 @@ inline void * cudaMallocHost_local_to_gpu(size_t size, int device){
 
     void      *mem = numa_alloc_onnode(size, numa_node_of_gpu(device));
     assert(mem);
-    gpu(cudaHostRegister(mem, size, 0));
+    gpu_run(cudaHostRegister(mem, size, 0));
 
     // T * mem;
-    // gpu(cudaMallocHost(&mem, sizeof(T)*size));
+    // gpu_run(cudaMallocHost(&mem, sizeof(T)*size));
 
     return mem;
 }
 
 inline void cudaFreeHost_local_to_gpu(void * mem, size_t size){
-    gpu(cudaHostUnregister(mem));
+    gpu_run(cudaHostUnregister(mem));
 
     numa_free(mem, size);
 }

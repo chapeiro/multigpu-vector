@@ -6,13 +6,13 @@
 using namespace std;
 
 template<typename F, typename TL, typename TR, typename Tout>
-class map{
+class map2{
 private:
     d_operator<Tout>                parent;
     Tout                           *out;
     const F                         trans;
 public:
-    __host__ map(d_operator<Tout> parent, F f, const launch_conf &conf);
+    __host__ map2(d_operator<Tout> parent, F f, const launch_conf &conf);
 
     __host__   void before_open();
     __device__ void at_open();
@@ -24,7 +24,7 @@ public:
     __device__ void at_close();
     __host__   void after_close();
 
-    __host__ ~map(){}
+    __host__ ~map2(){}
 };
 
 #endif /* MAP_CUH_ */

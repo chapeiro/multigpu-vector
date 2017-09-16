@@ -1,5 +1,6 @@
 #include "cpu_to_gpu.cuh"
 #include "../numa_utils.cuh"
+#include "../buffer_manager.cuh"
 
 using namespace std;
 

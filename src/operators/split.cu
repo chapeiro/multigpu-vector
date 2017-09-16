@@ -50,7 +50,7 @@ __device__ int hash3(int32_t x, int32_t y){
 }
 
 template<typename... T>
-__device__ void split<T...>::consume_warp(const T * __restrict__ ... src, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+__device__ void split<T...>::consume_warp(const T * __restrict__ ... src, cnt_t N, vid_t vid, cid_t cid){
     // const int32_t warpid            = get_warpid();
     const int32_t laneid            = get_laneid();
 

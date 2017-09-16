@@ -38,7 +38,7 @@ __host__ void exchange<T...>::consume(const T * ... src, cnt_t N, vid_t vid, cid
     int target = r->get_mapping<T...>(src..., N, vid, cid, [this](const T * ... src, cnt_t N, vid_t vid, cid_t cid){return rand() % parents.size();});
     assert(target >= 0 && target < parents.size());
 
-    unique_lock<mutex> lock(ready_pool_mutex[target]);
+    std::unique_lock<mutex> lock(ready_pool_mutex[target]);
     ready_pool[target].emplace(make_tuple(src...), N, vid, cid);
     ready_pool_cv[target].notify_all();
     lock.unlock();
@@ -46,7 +46,7 @@ __host__ void exchange<T...>::consume(const T * ... src, cnt_t N, vid_t vid, cid
 
 template<typename... T>
 __host__ bool exchange<T...>::get_ready(tuple<tuple<const T *...>, cnt_t, vid_t, cid_t> &p, int i){
-    unique_lock<mutex> lock(ready_pool_mutex[i]);
+    std::unique_lock<mutex> lock(ready_pool_mutex[i]);
 
     ready_pool_cv[i].wait(lock, [this, i](){return !ready_pool[i].empty() || (ready_pool[i].empty() && remaining_producers <= 0);});
 

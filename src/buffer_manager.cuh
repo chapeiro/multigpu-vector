@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <thread>
 #include <condition_variable>
+#include <sched.h>
 
 using namespace std;
 
@@ -22,10 +23,8 @@ extern __device__ __constant__ void * buff_end  ;
 template<typename T>
 class buffer_manager;
 
-template<typename T>
-__global__ void release_buffer_host(T **buff, int buffs = 1);
-template<typename T>
-__global__ void get_buffer_host    (T **buff, int buffs = 1);
+__global__ void release_buffer_host(void **buff, int buffs = 1);
+__global__ void get_buffer_host    (void **buff, int buffs = 1);
 
 template<typename T = int32_t>
 class buffer_manager{
@@ -62,25 +61,33 @@ public:
         return h_pool[numa_node]->pop();
     }
 
-    static __host__ __device__ T * get_buffer(){
-#ifdef __CUDA_ARCH__
+//     static __host__ __device__ T * get_buffer(){
+// #ifdef __CUDA_ARCH__
+//         return pool->pop();
+// #else
+//         return get_buffer_numa(sched_getcpu());
+// #endif
+//     }
+
+    static __device__ T * get_buffer(){
         return pool->pop();
-#else
-        return get_buffer_numa(sched_getcpu());
-#endif
     }
 
-    static __device__ bool try_get_buffer2(T **ret){
-#ifdef __CUDA_ARCH__
-        if (pool->try_pop(ret)){
-#else
-        if (h_pool[sched_getcpu()]->try_pop(ret)){
-#endif
-            // (*ret)->clean();
-            return true;
-        }
-        return false;
+    static __host__   T * get_buffer(){
+        return get_buffer_numa(sched_getcpu());
     }
+
+//     static __device__ bool try_get_buffer2(T **ret){
+// #ifdef __CUDA_ARCH__
+//         if (pool->try_pop(ret)){
+// #else
+//         if (h_pool[sched_getcpu()]->try_pop(ret)){
+// #endif
+//             // (*ret)->clean();
+//             return true;
+//         }
+//         return false;
+//     }
 
     static __host__ inline T * h_get_buffer(int dev);
 
@@ -97,13 +104,13 @@ public:
         int dev = get_device(buff);
         if (dev >= 0){
             set_device_on_scope d(dev);
-            unique_lock<std::mutex> lock(device_buffs_mutex[dev]);
+            std::unique_lock<std::mutex> lock(device_buffs_mutex[dev]);
             device_buffs_pool[dev].push_back(buff);
             size_t size = device_buffs_pool[dev].size();
             if (size > keep_threshold){
                 for (int i = 0 ; i < device_buff_size ; ++i) device_buff[dev][i] = device_buffs_pool[dev][size-i-1];
                 device_buffs_pool[dev].erase(device_buffs_pool[dev].end()-device_buff_size, device_buffs_pool[dev].end());
-                release_buffer_host<<<1, 1, 0, release_streams[dev]>>>(device_buff[dev], device_buff_size);
+                release_buffer_host<<<1, 1, 0, release_streams[dev]>>>((void **) device_buff[dev], device_buff_size);
                 gpu(cudaStreamSynchronize(release_streams[dev]));
                 // gpu(cudaPeekAtLastError()  );
                 // gpu(cudaDeviceSynchronize());
@@ -170,14 +177,18 @@ public:
     //         } //else if (!producers && !available_buffers) return false;
     //         outbuff = *ret;
     //     }
-    //     return true;
-    // }
+
 
     static __host__ void overwrite(T * buff, const T * data, uint32_t N, cudaStream_t strm, bool blocking = true);
+    
+    static __host__ void overwrite_bytes(void * buff, const void * data, size_t bytes, cudaStream_t strm, bool blocking = true);
 
     static __host__ void destroy(); //FIXME: cleanup...
 };
 
+extern "C" {
+    void * get_buffer(size_t bytes);
+}
 
 template<typename T>
 threadsafe_stack<T *, (T *) NULL> ** buffer_manager<T>::h_pool;

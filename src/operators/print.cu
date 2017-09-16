@@ -4,7 +4,7 @@ using namespace std;
 
 __host__ dprint::dprint(){}
 
-__device__ void dprint::consume_warp(const int32_t * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+__device__ void dprint::consume_warp(const int32_t * __restrict__ src, cnt_t N, vid_t vid, cid_t cid){
     assert(N <= vector_size);
 
     if (get_laneid() != 0) return;

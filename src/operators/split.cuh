@@ -23,7 +23,7 @@ public:
     __device__ void at_open();
 
     __device__ void consume_open();
-    __device__ void consume_warp(const T * __restrict__ ... src, cnt_t N, vid_t vid, cid_t cid) __restrict__;
+    __device__ void consume_warp(const T * __restrict__ ... src, cnt_t N, vid_t vid, cid_t cid);
     __device__ void consume_close();
 
     __device__ void at_close();

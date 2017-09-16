@@ -69,7 +69,7 @@ int32_t *s;
 int32_t *b;
 int32_t *c;
 
-__global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(const int32_t * __restrict__ a, const int32_t * __restrict__ b, uint32_t N, map<product, int32_t, int32_t, int32_t> * m){
+__global__ __launch_bounds__(65536, 4) void launch_consume_pipeline(const int32_t * __restrict__ a, const int32_t * __restrict__ b, uint32_t N, map2<product, int32_t, int32_t, int32_t> * m){
     assert(N % (vector_size * get_total_num_of_warps()) == 0);
 
     for (int j = 0 ; j < N ; j += vector_size * get_total_num_of_warps()){

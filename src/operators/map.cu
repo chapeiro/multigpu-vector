@@ -4,7 +4,7 @@
 using namespace std;
 
 template<typename F, typename TL, typename TR, typename Tout>
-__host__ map<F, TL, TR, Tout>::map(d_operator<Tout> parent, F f, const launch_conf &conf): 
+__host__ map2<F, TL, TR, Tout>::map2(d_operator<Tout> parent, F f, const launch_conf &conf): 
         parent(parent), trans(f){
     assert(conf.device >= 0);
     set_device_on_scope d(conf.device);
@@ -13,7 +13,7 @@ __host__ map<F, TL, TR, Tout>::map(d_operator<Tout> parent, F f, const launch_co
 }
 
 template<typename F, typename TL, typename TR, typename Tout>
-__device__ void map<F, TL, TR, Tout>::consume_warp(const TL * __restrict__ L, const TR * __restrict__ R, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+__device__ void map2<F, TL, TR, Tout>::consume_warp(const TL * __restrict__ L, const TR * __restrict__ R, cnt_t N, vid_t vid, cid_t cid){
     const int32_t laneid            = get_laneid();
 
     Tout * dst = out + vector_size * get_global_warpid();
@@ -36,30 +36,30 @@ __device__ void map<F, TL, TR, Tout>::consume_warp(const TL * __restrict__ L, co
 }
 
 template<typename F, typename TL, typename TR, typename Tout>
-__device__ void map<F, TL, TR, Tout>::consume_close(){
+__device__ void map2<F, TL, TR, Tout>::consume_close(){
     parent.consume_close();
 }
 
 template<typename F, typename TL, typename TR, typename Tout>
-__device__ void map<F, TL, TR, Tout>::consume_open(){
+__device__ void map2<F, TL, TR, Tout>::consume_open(){
     parent.consume_open();
 }
 
 template<typename F, typename TL, typename TR, typename Tout>
-__device__ void map<F, TL, TR, Tout>::at_open(){}
+__device__ void map2<F, TL, TR, Tout>::at_open(){}
 
 template<typename F, typename TL, typename TR, typename Tout>
-__device__ void map<F, TL, TR, Tout>::at_close(){}
+__device__ void map2<F, TL, TR, Tout>::at_close(){}
 
 template<typename F, typename TL, typename TR, typename Tout>
-__host__ void map<F, TL, TR, Tout>::before_open(){
+__host__ void map2<F, TL, TR, Tout>::before_open(){
     parent.open();
 }
 
 template<typename F, typename TL, typename TR, typename Tout>
-__host__ void map<F, TL, TR, Tout>::after_close(){
+__host__ void map2<F, TL, TR, Tout>::after_close(){
     parent.close();
 }
 
-template class map<product, int32_t, int32_t, int32_t>;
-template class map<log_and<sel_t>, sel_t, sel_t, sel_t>;
+template class map2<product, int32_t, int32_t, int32_t>;
+template class map2<log_and<sel_t>, sel_t, sel_t, sel_t>;

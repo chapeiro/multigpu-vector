@@ -6,24 +6,24 @@
 
 #include "numa_utils.cuh"
 
+#include <cinttypes>
+
 __device__ __constant__ threadsafe_device_stack<int32_t *, (int32_t *) NULL> * pool;
 __device__ __constant__ int deviceId;
 __device__ __constant__ void * buff_start;
 __device__ __constant__ void * buff_end  ;
 
 
-template<typename T>
-__global__ void release_buffer_host(T **buff, int buffs){
+__global__ void release_buffer_host(void **buff, int buffs){
     assert(blockDim.x * blockDim.y * blockDim.z == 1);
     assert( gridDim.x *  gridDim.y *  gridDim.z == 1);
-    for (int i = 0 ; i < buffs ; ++i) buffer_manager<T>::release_buffer(buff[i]);
+    for (int i = 0 ; i < buffs ; ++i) buffer_manager<int32_t>::release_buffer((int32_t *) buff[i]);
 }
 
-template<typename T>
-__global__ void get_buffer_host(T **buff, int buffs){
+__global__ void get_buffer_host(void **buff, int buffs){
     assert(blockDim.x * blockDim.y * blockDim.z == 1);
     assert( gridDim.x *  gridDim.y *  gridDim.z == 1);
-    for (int i = 0 ; i < buffs ; ++i) buff[i] = buffer_manager<T>::get_buffer();
+    for (int i = 0 ; i < buffs ; ++i) buff[i] = buffer_manager<int32_t>::get_buffer();
 }
 
 int                                                 cpu_cnt;
@@ -57,7 +57,11 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
     }
 
     //FIXME: Generalize
-    int cpu_numa_nodes = 2;
+    int cpu_numa_nodes = numa_num_task_nodes();
+
+    // std::cout << "CPU numa nodes : " << cpu_numa_nodes << std::endl;
+    // std::cout << "CPU cores      : " << cores << std::endl;
+    // std::cout << "GPU devices    : " << devices << std::endl;
 
     terminating        = false;
     device_buffs_mutex = new mutex              [devices];
@@ -78,9 +82,17 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
         // device_buff[i] = tmp + device_buff_size*sizeof(buffer_t *)*i;
     // }
 
-    gpu_affinity       = new cpu_set_t[devices];
+    nvmlInit();
+    unsigned int device_count;
+    nvmlDeviceGetCount(&device_count);
+    assert(device_count == devices && "NMVL disagrees with cuda about the number of GPUs");
 
-    for (int j = 0 ; j < devices ; ++j) CPU_ZERO(&gpu_affinity[j]);
+
+    gpu_affinity       = new cpu_set_t[devices];
+    cpu_numa_affinity  = new cpu_set_t[cpu_numa_nodes];
+
+    for (int j = 0 ; j < devices        ; ++j) CPU_ZERO(&gpu_affinity[j]);
+    for (int j = 0 ; j < cpu_numa_nodes ; ++j) CPU_ZERO(&cpu_numa_affinity[j]);
 
     // diascld36
     // //FIXME: Generalize
@@ -92,17 +104,55 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
     // for (int i = 0 ; i < 48 ; i += 2) CPU_SET(i, &cpu_numa_affinity[0]);
     // for (int i = 1 ; i < 48 ; i += 2) CPU_SET(i, &cpu_numa_affinity[1]);
 
-    // diascld37
-    //FIXME: Generalize
-    for (int i = 0  ; i < 14 ; ++i) CPU_SET(i, &gpu_affinity[0]);
-    for (int i = 0  ; i < 14 ; ++i) CPU_SET(i, &gpu_affinity[1]);
-    for (int i = 14 ; i < 28 ; ++i) CPU_SET(i, &gpu_affinity[2]);
-    for (int i = 14 ; i < 28 ; ++i) CPU_SET(i, &gpu_affinity[3]);
+    for (int j = 0 ; j < devices ; ++j){
+        int sets = ((cores + 63) / 64);
+        uint64_t cpuSet[sets];
+        for (int i = 0 ; i < sets ; ++i) cpuSet[i] = 0;
+        nvmlDevice_t device;
+
+        nvmlDeviceGetHandleByIndex(j, &device);
+        nvmlDeviceGetCpuAffinity(device, sets, cpuSet);
+        for (int i = 0 ; i < sets ; ++i){
+            for (int k = 0 ; k < 64 ; ++k){
+                if ((cpuSet[i] >> k) & 1){
+                    CPU_SET(64 * i + k, &gpu_affinity[j]);
+                }
+            }
+        }
+    }
+
+    for (int j = 0 ; j < cores ; ++j){
+        CPU_SET(j, &cpu_numa_affinity[numa_node_of_cpu(j)]);
+    }
+
+    // for (int i = 0 ; i < cores ; ++i){
+    //     std::cout << "CPU " << i << " local to GPU ";
+    //     for (int j = 0 ; j < devices ; ++j){
+    //         if (CPU_ISSET(i, &gpu_affinity[j])) std::cout << j;
+    //     }
+    //     std::cout << std::endl;
+    // }
+
+    // for (int i = 0 ; i < cores ; ++i){
+    //     std::cout << "CPU " << i << " local to NUMA ";
+    //     for (int j = 0 ; j < cpu_numa_nodes ; ++j){
+    //         if (CPU_ISSET(i, &cpu_numa_affinity[j])) std::cout << j;
+    //     }
+    //     std::cout << std::endl;
+    // }
+
+
+    // // diascld37
+    // //FIXME: Generalize
+    // for (int i = 0  ; i < 14 ; ++i) CPU_SET(i, &gpu_affinity[0]);
+    // for (int i = 0  ; i < 14 ; ++i) CPU_SET(i, &gpu_affinity[1]);
+    // for (int i = 14 ; i < 28 ; ++i) CPU_SET(i, &gpu_affinity[2]);
+    // for (int i = 14 ; i < 28 ; ++i) CPU_SET(i, &gpu_affinity[3]);
 
     //FIXME: Generalize
-    cpu_numa_affinity  = new cpu_set_t[cpu_numa_nodes];
-    for (int i = 0  ; i < 14 ; ++i) CPU_SET(i, &cpu_numa_affinity[0]);
-    for (int i = 14 ; i < 28 ; ++i) CPU_SET(i, &cpu_numa_affinity[1]);
+    // cpu_numa_affinity  = new cpu_set_t[cpu_numa_nodes];
+    // for (int i = 0  ; i < 14 ; ++i) CPU_SET(i, &cpu_numa_affinity[0]);
+    // for (int i = 14 ; i < 28 ; ++i) CPU_SET(i, &cpu_numa_affinity[1]);
 
     mutex buff_cache;
 
@@ -266,19 +316,22 @@ __host__ void buffer_manager<T>::destroy(){
                 device_buffs_cv[j].notify_all();
                 device_buffs_thrds[j]->join();
 
-                unique_lock<std::mutex> lock(device_buffs_mutex[j]);
+                std::unique_lock<std::mutex> lock(device_buffs_mutex[j]);
 
                 size_t size = device_buffs_pool[j].size();
                 assert(size <= keep_threshold);
                 for (int i = 0 ; i < size ; ++i) device_buff[j][i] = device_buffs_pool[j][i];
 
-                release_buffer_host<<<1, 1, 0, release_streams[j]>>>(device_buff[j], size);
+                release_buffer_host<<<1, 1, 0, release_streams[j]>>>((void **) device_buff[j], size);
                 gpu(cudaStreamSynchronize(release_streams[j]));
 
                 pool_t *tmp;
                 gpu(cudaMemcpyFromSymbol(&tmp, pool, sizeof(pool_t *)));
                 cuda_delete(tmp);
 
+                T * mem;
+                gpu(cudaMemcpyFromSymbol(&mem, buff_start, sizeof(void   *)));
+                gpu(cudaFree(mem));
 
                 gpu(cudaStreamDestroy(release_streams[j]));
 
@@ -319,18 +372,24 @@ __host__ void buffer_manager<T>::destroy(){
     for (auto &t: buffer_pool_constrs) t.join();
 }
 
+extern "C"{
+    void * get_buffer(size_t bytes){
+        assert(bytes <= sizeof(int32_t) * h_vector_size); //FIMXE: buffer manager should be able to allocate blocks of arbitary size
+        return (void *) buffer_manager<int32_t>::h_get_buffer(-1);
+    }
+}
 
 template<typename T>
 void buffer_manager<T>::dev_buff_manager(int dev){
     set_device_on_scope d(dev);
 
-    unique_lock<mutex> lk(device_buffs_mutex[dev]);
+    std::unique_lock<mutex> lk(device_buffs_mutex[dev]);
     while (true){
         device_buffs_cv[dev].wait(lk, [dev]{return device_buffs_pool[dev].empty() || terminating;});
 
         if (terminating) break;
 
-        get_buffer_host<<<1, 1, 0, release_streams[dev]>>>(device_buff[dev], device_buff_size);
+        get_buffer_host<<<1, 1, 0, release_streams[dev]>>>((void **) device_buff[dev], device_buff_size);
         gpu(cudaStreamSynchronize(release_streams[dev]));
 
         device_buffs_pool[dev].insert(device_buffs_pool[dev].end(), device_buff[dev], device_buff[dev]+device_buff_size);
@@ -344,7 +403,7 @@ void buffer_manager<T>::dev_buff_manager(int dev){
 template<typename T>
 __host__ inline T * buffer_manager<T>::h_get_buffer(int dev){
     if (dev >= 0){
-        unique_lock<std::mutex> lock(device_buffs_mutex[dev]);
+        std::unique_lock<std::mutex> lock(device_buffs_mutex[dev]);
 
         device_buffs_cv[dev].wait(lock, [dev]{return !device_buffs_pool[dev].empty();});
 
@@ -364,6 +423,10 @@ __host__ void buffer_manager<T>::overwrite(T * buff, const T * data, uint32_t N,
     if (blocking) gpu(cudaStreamSynchronize(strm));
 }
 
+template<typename T>
+__host__ void buffer_manager<T>::overwrite_bytes(void * buff, const void * data, size_t bytes, cudaStream_t strm, bool blocking){
+    gpu(cudaMemcpyAsync(buff, data, bytes, cudaMemcpyDefault, strm));
+    if (blocking) gpu(cudaStreamSynchronize(strm));
+}
+
 template class buffer_manager<int32_t>;
-template __global__ void release_buffer_host<int32_t>(int32_t **buff, int buffs);
-template __global__ void get_buffer_host    <int32_t>(int32_t **buff, int buffs);

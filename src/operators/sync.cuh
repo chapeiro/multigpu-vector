@@ -27,7 +27,7 @@ public:
 
     __device__ void consume_open();
 
-    __device__ void consume_warp(const void * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__;
+    __device__ void consume_warp(const void * __restrict__ src, cnt_t N, vid_t vid, cid_t cid);
 
     __device__ void consume_close();
 

@@ -31,7 +31,7 @@ __host__ void delayed_barrier<T...>::leave_behind(delayed_barrier<Tw...> *t, int
 }
 
 __host__ void delayed_barrier_state::block_until(int64_t at_least_consumed){
-    unique_lock<mutex> lk(m);
+    std::unique_lock<mutex> lk(m);
     cv.wait(lk, [this, at_least_consumed]{return consumed >= at_least_consumed;});
     lk.unlock();
 }

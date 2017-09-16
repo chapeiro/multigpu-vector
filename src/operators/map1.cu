@@ -13,7 +13,7 @@ __host__ map1<F, Tin, Tout>::map1(d_operator<Tout> parent, F f, const launch_con
 }
 
 template<typename F, typename Tin, typename Tout>
-__device__ void map1<F, Tin, Tout>::consume_warp(const Tin * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+__device__ void map1<F, Tin, Tout>::consume_warp(const Tin * __restrict__ src, cnt_t N, vid_t vid, cid_t cid){
     const int32_t laneid            = get_laneid();
 
     Tout * dst = out + vector_size * get_global_warpid();

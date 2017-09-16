@@ -71,7 +71,7 @@ __host__ synchro<TL, TR>::synchro(d_operator<TL, TR> parent, uint32_t slots, cid
 // }
 
 template<typename TL, typename TR>
-__device__ void synchro<TL, TR>::consume_warp(const void * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+__device__ void synchro<TL, TR>::consume_warp(const void * __restrict__ src, cnt_t N, vid_t vid, cid_t cid){
     static_assert(sizeof(TL) == sizeof(TR), "Unimplemented for different sizes");
     const int32_t warpid            = get_global_warpid();
     const int32_t laneid            = get_laneid();

@@ -44,7 +44,7 @@ public:
     __device__ void at_open();
 
     __device__ void consume_open();
-    __device__ void consume_warp(const T * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__;
+    __device__ void consume_warp(const T * __restrict__ src, cnt_t N, vid_t vid, cid_t cid);
     __device__ void consume_close();
 
     __device__ void at_close();
@@ -73,10 +73,10 @@ public:
 
     __device__ void consume_open();
     template<typename Tt = Tpayload, typename = typename std::enable_if< is_same<Tt, void>::value, void>::type>
-    __device__ void consume_warp(const Teq * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__;
+    __device__ void consume_warp(const Teq * __restrict__ src, cnt_t N, vid_t vid, cid_t cid);
 
     template<typename Tt = Tpayload, typename = typename std::enable_if<!is_same<Tt, void>::value, void>::type>
-    __device__ void consume_warp(const Teq * __restrict__ src, const Tpayload * __restrict__ payload, cnt_t N, vid_t vid, cid_t cid) __restrict__;
+    __device__ void consume_warp(const Teq * __restrict__ src, const Tpayload * __restrict__ payload, cnt_t N, vid_t vid, cid_t cid);
     __device__ void consume_close();
 
     __device__ void at_close();

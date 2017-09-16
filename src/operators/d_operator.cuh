@@ -90,8 +90,8 @@ private:
 
     launch_conf      conf;
 
-    friend void launch_close_pipeline4<Tin...>(d_operator<Tin...> *op);
-    friend void launch_open_pipeline4 <Tin...>(d_operator<Tin...> *op);
+    friend __global__ void launch_close_pipeline4<Tin...>(d_operator<Tin...> *op);
+    friend __global__ void launch_open_pipeline4 <Tin...>(d_operator<Tin...> *op);
 
 public:
     __host__ d_operator(): op(NULL){}

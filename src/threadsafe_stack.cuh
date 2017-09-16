@@ -30,13 +30,13 @@ public:
 
 public:
     __host__ void push(T v){
-        unique_lock<std::mutex> lock(m);
+        std::unique_lock<std::mutex> lock(m);
         data.push_back(v);
         cv.notify_all();
     }
 
     __host__ bool try_pop(T *ret){ //blocking (as long as the stack is not empty)
-        unique_lock<std::mutex> lock(m);
+        std::unique_lock<std::mutex> lock(m);
         if (data.empty()) return false;
         *ret = data.back();
         data.pop_back();
@@ -44,7 +44,7 @@ public:
     }
 
     __host__ T pop(){ //blocking
-        unique_lock<std::mutex> lock(m);
+        std::unique_lock<std::mutex> lock(m);
         cv.wait(lock, [this]{return !data.empty();});
         T ret = data.back();
         data.pop_back();

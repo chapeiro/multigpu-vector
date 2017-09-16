@@ -70,7 +70,7 @@ __device__ void hashjoin_builder<T>::consume_close(){}
 // }
 
 template<typename T>
-__device__ void hashjoin_builder<T>::consume_warp(const T * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__ {
+__device__ void hashjoin_builder<T>::consume_warp(const T * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) {
     const  int32_t laneid = get_laneid();
     const uint32_t mask   = ((1 << log_table_size) - 1);
 
@@ -79,7 +79,7 @@ __device__ void hashjoin_builder<T>::consume_warp(const T * __restrict__ src, cn
 
     vid_t offset;
     if (laneid == 0) offset = atomicAdd(&index, (vid_t) N);
-    offset = brdcst(offset, 0);
+    offset = brdcst((int32_t) offset, 0);
 
     for (uint32_t i = 0 ; i < vector_size ; i += warp_size){
         // vec4 s = reinterpret_cast<const vec4 *>(src)[i/4 + laneid];
@@ -200,7 +200,7 @@ __host__ d_operator<Teq> hashjoin<Teq, Tpayload>::get_builder(){
 
 template<typename Teq, typename Tpayload>
 template<typename Tt, typename>
-__device__ void hashjoin<Teq, Tpayload>::consume_warp(const Teq * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+__device__ void hashjoin<Teq, Tpayload>::consume_warp(const Teq * __restrict__ src, cnt_t N, vid_t vid, cid_t cid) {
     const int32_t laneid = get_laneid();
     const uint32_t mask  = ((1 << log_table_size) - 1);
 
@@ -260,7 +260,7 @@ __device__ void hashjoin<Teq, Tpayload>::consume_warp(const Teq * __restrict__ s
 
 template<typename Teq, typename Tpayload>
 template<typename Tt, typename>
-__device__ void hashjoin<Teq, Tpayload>::consume_warp(const Teq * __restrict__ src, const Tpayload * __restrict__ payload, cnt_t N, vid_t vid, cid_t cid) __restrict__{
+__device__ void hashjoin<Teq, Tpayload>::consume_warp(const Teq * __restrict__ src, const Tpayload * __restrict__ payload, cnt_t N, vid_t vid, cid_t cid) {
     static_assert(is_same<Tpayload, int32_t>::value, "not implemented");
     const int32_t laneid = get_laneid();
     const uint32_t mask  = ((1 << log_table_size) - 1);
@@ -335,6 +335,6 @@ __host__ void hashjoin<Teq, Tpayload>::after_close(){
 
 template class hashjoin_builder<int32_t>;
 template class hashjoin<int32_t>;
-template __device__ void hashjoin<int32_t>::consume_warp<>(const int32_t * __restrict__, cnt_t, vid_t, cid_t) __restrict__;
+template __device__ void hashjoin<int32_t>::consume_warp<>(const int32_t * __restrict__, cnt_t, vid_t, cid_t);
 template class hashjoin<int32_t, int32_t>;
-template __device__ void hashjoin<int32_t, int32_t>::consume_warp<>(const int32_t * __restrict__, const int32_t * __restrict__, cnt_t, vid_t, cid_t) __restrict__;
+template __device__ void hashjoin<int32_t, int32_t>::consume_warp<>(const int32_t * __restrict__, const int32_t * __restrict__, cnt_t, vid_t, cid_t);

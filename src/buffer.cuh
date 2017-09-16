@@ -15,7 +15,7 @@ class buffer_inspector;
 template<typename T = int32_t, uint32_t size = DEFAULT_BUFF_CAP, typename T4 = vec4>
 class buffer {
     static_assert(sizeof(T) == sizeof(int32_t), "Incompatible size");
-    static_assert((size % (4*WARPSIZE)) == 0, "Buffer must have a size multiple of 4*warpSize");
+    static_assert((size % (4*WARPSIZE)) == 0, "Buffer must have a size multiple of 4*warp_size");
 public:
     typedef buffer_inspector<T, size, T4> inspector_t;
 
@@ -71,7 +71,7 @@ public:
     }
 
     __host__ __device__ uint32_t remaining_capacity() const{
-        return size - count(); //cap * warpSize;
+        return size - count(); //cap * warp_size;
     }
 
     __host__ __device__ static constexpr uint32_t capacity(){
@@ -92,12 +92,12 @@ public:
     __device__ __forceinline__ bool try_write(const T4 &x) volatile{
         uint32_t laneid = get_laneid();
         uint32_t old_cnt;
-        if (laneid == 0) old_cnt = atomicAdd((uint32_t *) &cnt, 4*warpSize);
+        if (laneid == 0) old_cnt = atomicAdd((uint32_t *) &cnt, 4*warp_size);
         old_cnt = brdcst(old_cnt, 0);
 
-        assert(old_cnt % (4*warpSize) == 0);
+        assert(old_cnt % (4*warp_size) == 0);
 
-        if (old_cnt > size - 4*warpSize) return false;
+        if (old_cnt > size - 4*warp_size) return false;
         reinterpret_cast<T4 *>(data + old_cnt)[laneid] = x; //FIXME: someone may have not completed writing out everything when the buffer gets released!
         // data[old_cnt + laneid] = x; //FIXME: someone may have not completed writing out everything when the buffer gets released!
         return true;
@@ -107,13 +107,13 @@ public:
         // uint32_t laneid;
         // asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
         // if (!try_write(reinterpret_cast<const T4 *>(x)[laneid])) return false;
-        // if (laneid == 0) atomicSub((uint32_t *) &cnt, 4*warpSize - N);
+        // if (laneid == 0) atomicSub((uint32_t *) &cnt, 4*warp_size - N);
         // // if (cnt + N > size) return false;
         // // cnt += N;
         // return true;
         uint32_t laneid = get_laneid();
         uint32_t old_cnt;
-        assert(N < 4*warpSize);
+        assert(N < 4*warp_size);
         if (laneid == 0) old_cnt = atomicAdd((uint32_t *) &cnt, N);
         old_cnt = brdcst(old_cnt, 0);
 
@@ -124,8 +124,8 @@ public:
 
         #pragma unroll
         for (int k = 0 ; k < 4 ; ++k){
-            if (k*warpSize + laneid < N){
-                data[old_cnt + k*warpSize + laneid] = x[k * warpSize + laneid];
+            if (k*warp_size + laneid < N){
+                data[old_cnt + k*warp_size + laneid] = x[k * warp_size + laneid];
             }
         }
             // reinterpret_cast<T4 *>(data + old_cnt)[laneid] = x; //FIXME: someone may have not completed writing out everything when the buffer gets released!
@@ -134,7 +134,7 @@ public:
     }
 
     __device__ __forceinline__ bool may_write() const{
-        return (cnt <= size - 4*warpSize);
+        return (cnt <= size - 4*warp_size);
     }
 
     // T * begin(){

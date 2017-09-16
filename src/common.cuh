@@ -1,6 +1,7 @@
 #ifndef COMMON_CUH_
 #define COMMON_CUH_
 
+#include "common/gpu/gpu-common.hpp"
 #include <iostream>
 #include <cassert>
 #include <type_traits>
@@ -8,37 +9,36 @@
 #include <unistd.h>
 #include <numaif.h>
 #include <tuple>
-#include <thrust/tuple.h>
 
-#ifndef DEFAULT_BUFF_CAP
-#define DEFAULT_BUFF_CAP (16*1024*1024)
-#endif
+// #ifndef DEFAULT_BUFF_CAP
+// #define DEFAULT_BUFF_CAP (16*1024*1024)
+// #endif
 
-#ifndef WARPSIZE
-#define WARPSIZE (32)
-#endif
+// #ifndef WARPSIZE
+// #define WARPSIZE (32)
+// #endif
 
-typedef size_t   vid_t;
-typedef uint32_t cid_t;
-typedef uint32_t sel_t;
-typedef uint32_t cnt_t;
+// typedef size_t   vid_t;
+// typedef uint32_t cid_t;
+// typedef uint32_t sel_t;
+// typedef uint32_t cnt_t;
 
-constexpr cnt_t    vector_size   =    32*4*WARPSIZE;
-constexpr cnt_t    h_vector_size = DEFAULT_BUFF_CAP;
-constexpr uint32_t warp_size     =         WARPSIZE;
+// constexpr cnt_t    vector_size   =    32*4*WARPSIZE;
+// constexpr cnt_t    h_vector_size = DEFAULT_BUFF_CAP;
+// constexpr uint32_t warp_size     =         WARPSIZE;
 
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
-__host__ __device__ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true){
-    if (code != cudaSuccess) {
-#ifndef __CUDA_ARCH__
-        fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-        if (abort) exit(code);
-#else
-        printf("GPUassert: %s %s %d\n", "error", file, line);
-#endif
-    }
-}
+// __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true){
+//     if (code != cudaSuccess) {
+// #ifndef __CUDA_ARCH__
+//         fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+//         if (abort) exit(code);
+// #else
+//         printf("GPUassert: %s %s %d\n", "error", file, line);
+// #endif
+//     }
+// }
 
 // #if __CUDA_ARCH__ < 300 || defined (NUSE_SHFL)
 #define BRDCSTMEM(blockDim) ((blockDim.x * blockDim.y)/ WARPSIZE)
@@ -46,40 +46,26 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file, in
 // #define BRDCSTMEM(blockDim) (0)
 // #endif
 
-class set_device_on_scope{
-private:
-    int device;
-public:
-    inline set_device_on_scope(int set){
-        gpu(cudaGetDevice(&device));
-        if (set >= 0) gpu(cudaSetDevice(set));
-    }
+// template<typename T,
+//          typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
+//             int>::type = 0>
+// __device__ T atomicExch(T *address, T val){
+//     return (T) atomicExch((unsigned long long int*) address, (unsigned long long int) val);
+// }
 
-    inline ~set_device_on_scope(){
-        gpu(cudaSetDevice(device));
-    }
-};
+// template<typename T,
+//          typename std::enable_if<sizeof(T) == sizeof(unsigned int) && !std::is_signed<T>::value,
+//             int>::type = 0>
+// __device__ T atomicExch(T *address, T val){
+//     return (T) atomicExch((unsigned int*) address, (unsigned int) val);
+// }
 
-template<typename T,
-         typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
-            int>::type = 0>
-__device__ T atomicExch(T *address, T val){
-    return (T) atomicExch((unsigned long long int*) address, (unsigned long long int) val);
-}
-
-template<typename T,
-         typename std::enable_if<sizeof(T) == sizeof(unsigned int) && !std::is_signed<T>::value,
-            int>::type = 0>
-__device__ T atomicExch(T *address, T val){
-    return (T) atomicExch((unsigned int*) address, (unsigned int) val);
-}
-
-template<typename T,
-         typename std::enable_if<sizeof(T) == sizeof(int) && std::is_signed<T>::value,
-            int>::type = 0>
-__device__ T atomicExch(T *address, T val){
-    return (T) atomicExch((int*) address, (int) val);
-}
+// template<typename T,
+//          typename std::enable_if<sizeof(T) == sizeof(int) && std::is_signed<T>::value,
+//             int>::type = 0>
+// __device__ T atomicExch(T *address, T val){
+//     return (T) atomicExch((int*) address, (int) val);
+// }
 
 template<typename T,
          typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
@@ -102,26 +88,26 @@ __device__ T atomicCAS(T *address, T comp, T val){
     return (T) atomicCAS((int*) address, (int) comp, (int) val);
 }
 
-template<typename T,
-         typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
-            int>::type = 0>
-__device__ T atomicAdd(T *address, T val){
-    return (T) atomicAdd((unsigned long long int*) address, (unsigned long long int) val);
-}
+// template<typename T,
+//          typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
+//             int>::type = 0>
+// __device__ T atomicAdd(T *address, T val){
+//     return (T) atomicAdd((unsigned long long int*) address, (unsigned long long int) val);
+// }
 
-template<typename T,
-         typename std::enable_if<sizeof(T) == sizeof(unsigned int) && !std::is_signed<T>::value,
-            int>::type = 0>
-__device__ T atomicAdd(T *address, T val){
-    return (T) atomicAdd((unsigned int*) address, (unsigned int) val);
-}
+// template<typename T,
+//          typename std::enable_if<sizeof(T) == sizeof(unsigned int) && !std::is_signed<T>::value,
+//             int>::type = 0>
+// __device__ T atomicAdd(T *address, T val){
+//     return (T) atomicAdd((unsigned int*) address, (unsigned int) val);
+// }
 
-template<typename T,
-         typename std::enable_if<sizeof(T) == sizeof(int) && std::is_signed<T>::value,
-            int>::type = 0>
-__device__ T atomicAdd(T *address, T val){
-    return (T) atomicAdd((int*) address, (int) val);
-}
+// template<typename T,
+//          typename std::enable_if<sizeof(T) == sizeof(int) && std::is_signed<T>::value,
+//             int>::type = 0>
+// __device__ T atomicAdd(T *address, T val){
+//     return (T) atomicAdd((int*) address, (int) val);
+// }
 
 template<typename T,
          typename std::enable_if<sizeof(T) == sizeof(unsigned long long int),
@@ -193,9 +179,6 @@ __host__ void cuda_delete(T *obj, Args... args){
     }
 }
 
-__host__ int get_device(const void *p);
-
-
 struct launch_conf{
     dim3    gridDim     ;
     dim3    blockDim    ;
@@ -224,18 +207,18 @@ struct launch_conf{
     }
 };
 
-__device__ __forceinline__ int get_laneid(){
-    uint32_t laneid;
-    asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
-    return laneid;
-}
+// __device__ __forceinline__ int get_laneid(){
+//     uint32_t laneid;
+//     asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+//     return laneid;
+// }
 
 __device__ __forceinline__ int get_threadid(){
     return threadIdx.x + blockDim.x * threadIdx.y + blockDim.x * blockDim.y * threadIdx.z;
 }
 
 __device__ __forceinline__ int get_warpid(){
-    return get_threadid() / warpSize;
+    return ::get_threadid() / warpSize;
 }
 
 __device__ __forceinline__ int get_blockid(){
@@ -251,23 +234,23 @@ __device__ __forceinline__ int get_blocks_per_grid(){
 }
 
 __device__ __forceinline__ int get_warps_per_block(){
-    return (get_threads_per_block() + WARPSIZE - 1)/WARPSIZE;
+    return (::get_threads_per_block() + WARPSIZE - 1)/WARPSIZE;
 }
 
 __device__ __forceinline__ int get_global_warpid(){
-    return get_blockid() * get_warps_per_block() + get_warpid();
+    return ::get_blockid() * ::get_warps_per_block() + ::get_warpid();
 }
 
 __device__ __forceinline__ int get_global_thread_id(){
-    return get_blockid() * get_threads_per_block() + get_threadid();
+    return ::get_blockid() * ::get_threads_per_block() + ::get_threadid();
 }
 
 __device__ __forceinline__ int get_total_num_of_warps(){
-    return get_warps_per_block() * get_blocks_per_grid();
+    return ::get_warps_per_block() * ::get_blocks_per_grid();
 }
 
 __device__ __forceinline__ int get_total_num_of_threads(){
-    return get_threads_per_block() * get_blocks_per_grid();
+    return ::get_threads_per_block() * ::get_blocks_per_grid();
 }
 
 __device__ __host__ int __forceinline__ find_nth_set_bit(uint32_t c1, unsigned int n){
@@ -460,11 +443,11 @@ template<unsigned...> struct seq{ using type = seq; };
 template<class S1, class S2> struct concat;
 
 template<unsigned... I1, unsigned... I2>
-struct concat<seq<I1...>, seq<I2...>>
+struct ::concat<seq<I1...>, seq<I2...>>
   : seq<I1..., (sizeof...(I1)+I2)...>{};
 
 template<class S1, class S2>
-using Concat = Invoke<concat<S1, S2>>;
+using Concat = Invoke<::concat<S1, S2>>;
 
 template<unsigned N> struct gen_seq;
 template<unsigned N> using GenSeq = Invoke<gen_seq<N>>;
