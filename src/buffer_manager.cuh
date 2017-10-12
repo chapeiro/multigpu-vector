@@ -26,6 +26,9 @@ class buffer_manager;
 __global__ void release_buffer_host(void **buff, int buffs = 1);
 __global__ void get_buffer_host    (void **buff, int buffs = 1);
 
+void initializeModule(CUmodule & cudaModule);
+
+
 template<typename T = int32_t>
 class buffer_manager{
     static_assert(std::is_same<T, int32_t>::value, "Not implemented yet");
@@ -61,22 +64,12 @@ public:
         return h_pool[numa_node]->pop();
     }
 
-//     static __host__ __device__ T * get_buffer(){
-// #ifdef __CUDA_ARCH__
-//         return pool->pop();
-// #else
-//         return get_buffer_numa(sched_getcpu());
-// #endif
-//     }
-
-    static __device__ T * get_buffer(){
-        return pool->pop();
-    }
-
-    static __host__   T * get_buffer(){
-        return get_buffer_numa(sched_getcpu());
-    }
-
+#if defined(__clang__) && defined(__CUDA__)
+    static __device__ T * get_buffer();
+    static __host__   T * get_buffer();
+#else
+    static __host__ __device__ T * get_buffer();
+#endif
 //     static __device__ bool try_get_buffer2(T **ret){
 // #ifdef __CUDA_ARCH__
 //         if (pool->try_pop(ret)){
@@ -188,6 +181,12 @@ public:
 
 extern "C" {
     void * get_buffer(size_t bytes);
+}
+
+extern "C"{
+__device__ void dprinti64(int64_t x);
+__device__ int32_t * get_buffers();
+__device__ void release_buffers(int32_t * buff);
 }
 
 template<typename T>

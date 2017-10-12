@@ -90,8 +90,13 @@ private:
 
     launch_conf      conf;
 
+#if defined(__clang__) && defined(__CUDA__)         //Compiling with clang++ 
     friend __global__ void launch_close_pipeline4<Tin...>(d_operator<Tin...> *op);
     friend __global__ void launch_open_pipeline4 <Tin...>(d_operator<Tin...> *op);
+#else                                               //Compiling with nvcc
+    friend            void launch_close_pipeline4<Tin...>(d_operator<Tin...> *op);
+    friend            void launch_open_pipeline4 <Tin...>(d_operator<Tin...> *op);
+#endif
 
 public:
     __host__ d_operator(): op(NULL){}

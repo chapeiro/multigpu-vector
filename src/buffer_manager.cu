@@ -13,6 +13,67 @@ __device__ __constant__ int deviceId;
 __device__ __constant__ void * buff_start;
 __device__ __constant__ void * buff_end  ;
 
+#include <cstdio>
+#include <cinttypes>
+#include "common/gpu/gpu-common.hpp"
+#include "multigpu/buffer_manager.cuh"
+
+extern "C"{
+
+__device__ void dprinti64(int64_t x){
+    printf("%" PRId64 "\n", x);
+}
+
+__device__ int32_t * get_buffers(){
+    uint32_t b = __ballot(1);
+    uint32_t m = 1 << get_laneid();
+    int32_t * ret;
+    do {
+        uint32_t leader = b & -b;
+
+        if (leader == m) ret = buffer_manager<int32_t>::get_buffer();
+
+        b ^= leader;
+    } while (b);
+    return ret;
+}
+
+__device__ void release_buffers(int32_t * buff){
+    uint32_t b = __ballot(buff != NULL);
+    uint32_t m = 1 << get_laneid();
+    do {
+        uint32_t leader = b & -b;
+
+        if (leader == m) buffer_manager<int32_t>::release_buffer(buff);
+
+        b ^= leader;
+    } while (b);
+}
+
+}
+
+void initializeModule(CUmodule & cudaModule){
+    CUdeviceptr ptr  ;
+    size_t      bytes;
+    void *      mem  ;
+
+    gpu(cuModuleGetGlobal(&ptr, &bytes, cudaModule, "pool"));
+    gpu(cudaMemcpyFromSymbol(&mem, pool      , sizeof(void   *)));
+    gpu(cuMemcpyHtoD        (ptr , &mem      , sizeof(void   *)));
+
+    gpu(cuModuleGetGlobal(&ptr, &bytes, cudaModule, "buff_start"));
+    gpu(cudaMemcpyFromSymbol(&mem, buff_start, sizeof(void   *)));
+    gpu(cuMemcpyHtoD        (ptr , &mem      , sizeof(void   *)));
+
+    gpu(cuModuleGetGlobal(&ptr, &bytes, cudaModule, "buff_end"));
+    gpu(cudaMemcpyFromSymbol(&mem, buff_end, sizeof(void   *)));
+    gpu(cuMemcpyHtoD        (ptr , &mem      , sizeof(void   *)));
+
+    gpu(cuModuleGetGlobal(&ptr, &bytes, cudaModule, "deviceId"));
+    gpu(cudaMemcpyFromSymbol(&mem, deviceId  , sizeof(int)));
+    gpu(cuMemcpyHtoD        (ptr , &mem      , sizeof(int)));
+}
+
 
 __global__ void release_buffer_host(void **buff, int buffs){
     assert(blockDim.x * blockDim.y * blockDim.z == 1);
@@ -30,14 +91,41 @@ int                                                 cpu_cnt;
 cpu_set_t                                          *gpu_affinity;
 cpu_set_t                                          *cpu_numa_affinity;
 
+#if defined(__clang__) && defined(__CUDA__)
+template<typename T>
+__device__ T * buffer_manager<T>::get_buffer(){
+    return pool->pop();
+}
+
+template<typename T>
+__host__   T * buffer_manager<T>::get_buffer(){
+    return get_buffer_numa(sched_getcpu());
+}
+#else
+template<typename T>
+__host__ __device__ T * buffer_manager<T>::get_buffer(){
+#ifdef __CUDA_ARCH__
+    return pool->pop();
+#else
+    return get_buffer_numa(sched_getcpu());
+#endif
+}
+#endif
+
 template<typename T>
 __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_keep_threshold){
-    int devices;
-    gpu(cudaGetDeviceCount(&devices));
+    int devices = get_num_of_gpus();
 
     long cores = sysconf(_SC_NPROCESSORS_ONLN);
     assert(cores > 0);
     cpu_cnt = cores;
+
+    for (int i = 0 ; i < devices ; ++i) {
+        gpu_run(cudaSetDevice(i));
+        gpu_run(cudaFree(0));
+    }
+    
+    gpu_run(cudaSetDevice(0));
 
 
     // P2P check & enable
@@ -76,6 +164,8 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
     device_buff        = new T **[devices];
     device_buff_size   = buff_buffer_size;
     keep_threshold     = buff_keep_threshold;
+
+    buffer_cache.clear();
 
     // gpu(cudaMallocHost(&tmp, device_buff_size*sizeof(buffer_t *)*devices));
     // for (int i = 0 ; i < devices ; ++i) {
@@ -365,9 +455,6 @@ __host__ void buffer_manager<T>::destroy(){
         delete h_pool_numa[i];
         // });
     }
-
-
-
 
     for (auto &t: buffer_pool_constrs) t.join();
 }

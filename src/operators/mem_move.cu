@@ -14,7 +14,8 @@ void make_mem_move(const T * __restrict__ &src, int target_device, cnt_t N, cuda
 
         T * buff = buffer_manager<int32_t>::h_get_buffer(target_device);
 
-        buffer_manager<int32_t>::overwrite(buff, src, N, strm, true);
+        buffer_manager<int32_t>::overwrite     (buff, src, N, strm, true);
+        // buffer_manager<int32_t>::release_buffer(src                     );
 
         src = buff;
     }
@@ -34,6 +35,7 @@ char * make_mem_move_device(char * src, size_t bytes, int target_device, void * 
     char * buff = (char *) buffer_manager<int32_t>::h_get_buffer(target_device);
 
     buffer_manager<int32_t>::overwrite_bytes(buff, src, bytes, (cudaStream_t) strm, true);
+    buffer_manager<int32_t>::release_buffer ((int32_t *) src                            );
 
     return buff;
 }

@@ -4,6 +4,7 @@
 #include "common.cuh"
 #include <cstdint>
 #include <limits>
+#include <iomanip>
 
 using namespace std;
 
@@ -22,8 +23,8 @@ private:
     volatile uint32_t cnt;
     const    uint32_t size;
 
-    volatile int lock;
-    volatile T * data;
+    volatile int lock;      //consider changing the orde of parameters to : data, cnt, lock (128bits) to load the important part of the DS
+    volatile T * data;      //OR cnt, size, data, lock to load the non-atomic part of the DS with a single 128bit load
 
 public:
     __host__ threadsafe_device_stack(uint32_t size, vector<T> fill, int device):
@@ -39,7 +40,7 @@ public:
 
     __host__ ~threadsafe_device_stack(){
         gpu(cudaFree((T *) data));
-        cout << "----------------------------------------------------->" << cnt << " " << size << endl;
+        cout << "----------------------------------------------------->" << cnt << " " << size << " (" << get_device() << ")" << endl;
         // assert(cnt == size);
     }
 
