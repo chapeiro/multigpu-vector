@@ -45,6 +45,8 @@ public:
     static T                                                ***device_buff;
     static int                                                 device_buff_size;
     static int                                                 keep_threshold;
+    static void                                              **h_buff_start;
+    static void                                              **h_buff_end  ;
 
     static cudaStream_t                                       *release_streams;
 
@@ -96,6 +98,8 @@ public:
 #else
         int dev = get_device(buff);
         if (dev >= 0){
+            if (buff < h_buff_start[dev] || buff >= h_buff_end[dev]) return;
+
             set_device_on_scope d(dev);
             std::unique_lock<std::mutex> lock(device_buffs_mutex[dev]);
             device_buffs_pool[dev].push_back(buff);
@@ -225,4 +229,8 @@ int                                                 buffer_manager<T>::keep_thre
 template<typename T>
 cudaStream_t                                       *buffer_manager<T>::release_streams;
 
+template<typename T>
+void                                              **buffer_manager<T>::h_buff_start;
+template<typename T>
+void                                              **buffer_manager<T>::h_buff_end  ;
 #endif /* BUFFER_MANAGER_CUH_ */

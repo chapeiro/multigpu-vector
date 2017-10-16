@@ -161,6 +161,9 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
     h_pool             = new h_pool_t *         [cores  ];
     h_pool_numa        = new h_pool_t *         [cpu_numa_nodes];
 
+    h_buff_start       = new void              *[devices];
+    h_buff_end         = new void              *[devices];
+
     device_buff        = new T **[devices];
     device_buff_size   = buff_buffer_size;
     keep_threshold     = buff_keep_threshold;
@@ -280,10 +283,13 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
                 void * e = (void *) (((char *) mem) + size*pitch);
                 gpu(cudaMemcpyToSymbol(buff_end  ,   &e, sizeof(void   *)));
 
+                h_buff_start[j] = mem;
+                h_buff_end  [j] = e  ;
+
                 gpu(cudaStreamCreateWithFlags(&(release_streams[j]), cudaStreamNonBlocking));
 
                 T **bf;
-                gpu(cudaMallocHost(&bf, device_buff_size*sizeof(T *)));
+                gpu(cudaMallocHost(&bf, std::max(device_buff_size, keep_threshold)*sizeof(T *)));
                 device_buff[j] = bf;
 
                 device_buffs_thrds[j] = new thread(dev_buff_manager, j);
@@ -378,8 +384,7 @@ __host__ void buffer_manager<T>::destroy(){
     long cores = sysconf(_SC_NPROCESSORS_ONLN);
     assert(cores > 0);
 
-    //FIXME: Generalize
-    int cpu_numa_nodes = 2;
+    int cpu_numa_nodes = numa_num_task_nodes();
 
     terminating = true;
 
@@ -410,7 +415,7 @@ __host__ void buffer_manager<T>::destroy(){
 
                 size_t size = device_buffs_pool[j].size();
                 assert(size <= keep_threshold);
-                for (int i = 0 ; i < size ; ++i) device_buff[j][i] = device_buffs_pool[j][i];
+                for (size_t i = 0 ; i < size ; ++i) device_buff[j][i] = device_buffs_pool[j][i];
 
                 release_buffer_host<<<1, 1, 0, release_streams[j]>>>((void **) device_buff[j], size);
                 gpu(cudaStreamSynchronize(release_streams[j]));
@@ -457,6 +462,23 @@ __host__ void buffer_manager<T>::destroy(){
     }
 
     for (auto &t: buffer_pool_constrs) t.join();
+
+    terminating        = false;
+    delete[] device_buffs_mutex;
+    delete[] device_buffs_cv   ;
+    delete[] device_buffs_thrds;
+    delete[] device_buffs_pool ;
+    delete[] release_streams   ;
+
+    delete[] h_pool            ;
+    delete[] h_pool_numa       ;
+
+    delete[] h_buff_start      ;
+    delete[] h_buff_end        ;
+
+    delete[] device_buff       ;
+
+    buffer_cache.clear();
 }
 
 extern "C"{

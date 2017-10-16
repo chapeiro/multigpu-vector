@@ -23,6 +23,8 @@ private:
     volatile uint32_t cnt;
     const    uint32_t size;
 
+
+    // int          lock;      //consider changing the orde of parameters to : data, cnt, lock (128bits) to load the important part of the DS
     volatile int lock;      //consider changing the orde of parameters to : data, cnt, lock (128bits) to load the important part of the DS
     volatile T * data;      //OR cnt, size, data, lock to load the non-atomic part of the DS with a single 128bit load
 
@@ -39,7 +41,15 @@ public:
     }
 
     __host__ ~threadsafe_device_stack(){
+        // void ** t = (void **) malloc(cnt * sizeof(T));
+        // gpu(cudaMemcpy(t, (void *) data, cnt*sizeof(T), cudaMemcpyDefault));
+        // for (int i = 0 ; i < cnt ; ++i){
+        //     printf("%p ", t[i]);
+        // }
+        // printf("\n");
+
         gpu(cudaFree((T *) data));
+
         cout << "----------------------------------------------------->" << cnt << " " << size << " (" << get_device() << ")" << endl;
         // assert(cnt == size);
     }
@@ -54,6 +64,9 @@ public:
         data[cnt++] = v;
 
         lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
+        // __threadfence();
+
+        // atomicExch((int *) &lock, 0);
     }
 
     __device__ bool try_pop(T *ret){
@@ -63,12 +76,17 @@ public:
 
         if (cnt == 0) {
             lock = 0;   //FIXME: atomicExch() is probably needed here. This should have undef behavior
+            // atomicExch((int *) &lock, 0);
             return false;
         }
 
         *ret = data[--cnt];
 
         lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
+
+        // __threadfence();
+
+        // atomicExch((int *) &lock, 0);
 
         return true;
     }
