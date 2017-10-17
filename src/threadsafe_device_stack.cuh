@@ -50,7 +50,7 @@ public:
 
         gpu(cudaFree((T *) data));
 
-        cout << "----------------------------------------------------->" << cnt << " " << size << " (" << get_device() << ")" << endl;
+        cout << "--------------------------------------------------------->dev" << get_device() << "_stack: " << cnt << " " << size << endl;
         // assert(cnt == size);
     }
 
