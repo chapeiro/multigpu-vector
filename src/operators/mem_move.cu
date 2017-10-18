@@ -34,8 +34,8 @@ char * make_mem_move_device(char * src, size_t bytes, int target_device, void * 
     assert(bytes <= sizeof(int32_t) * h_vector_size); //FIMXE: buffer manager should be able to provide blocks of arbitary size
     char * buff = (char *) buffer_manager<int32_t>::h_get_buffer(target_device);
 
-    buffer_manager<int32_t>::overwrite_bytes(buff, src, bytes, (cudaStream_t) strm, true);
-    buffer_manager<int32_t>::release_buffer ((int32_t *) src                            );
+    buffer_manager<int32_t>::overwrite_bytes(buff, src, bytes, (cudaStream_t) strm, false);
+    // buffer_manager<int32_t>::release_buffer ((int32_t *) src                             );
 
     return buff;
 }

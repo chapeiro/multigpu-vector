@@ -486,6 +486,10 @@ extern "C"{
         assert(bytes <= sizeof(int32_t) * h_vector_size); //FIMXE: buffer manager should be able to allocate blocks of arbitary size
         return (void *) buffer_manager<int32_t>::h_get_buffer(-1);
     }
+
+    void   release_buffer(void * buff){
+        buffer_manager<int32_t>::release_buffer((int32_t *) buff);
+    }
 }
 
 template<typename T>

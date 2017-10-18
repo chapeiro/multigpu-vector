@@ -184,7 +184,8 @@ public:
 };
 
 extern "C" {
-    void * get_buffer(size_t bytes);
+    void * get_buffer    (size_t bytes);
+    void   release_buffer(void * buff );
 }
 
 extern "C"{
