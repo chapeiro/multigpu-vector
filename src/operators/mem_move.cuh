@@ -6,10 +6,6 @@
 
 using namespace std;
 
-extern "C"{
-char * make_mem_move_device(char * src, size_t bytes, int target_device, void * strm);
-}
-
 template<typename T>
 class mem_move{
 private:

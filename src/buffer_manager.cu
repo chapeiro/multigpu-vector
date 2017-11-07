@@ -90,6 +90,7 @@ __global__ void get_buffer_host(void **buff, int buffs){
 int                                                 cpu_cnt;
 cpu_set_t                                          *gpu_affinity;
 cpu_set_t                                          *cpu_numa_affinity;
+int                                                *gpu_numa_node;
 
 #if defined(__clang__) && defined(__CUDA__)
 template<typename T>
@@ -183,6 +184,7 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
 
     gpu_affinity       = new cpu_set_t[devices];
     cpu_numa_affinity  = new cpu_set_t[cpu_numa_nodes];
+    gpu_numa_node      = new int      [devices];
 
     for (int j = 0 ; j < devices        ; ++j) CPU_ZERO(&gpu_affinity[j]);
     for (int j = 0 ; j < cpu_numa_nodes ; ++j) CPU_ZERO(&cpu_numa_affinity[j]);
@@ -217,6 +219,9 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
     for (int j = 0 ; j < cores ; ++j){
         CPU_SET(j, &cpu_numa_affinity[numa_node_of_cpu(j)]);
     }
+
+    //numa_node_of_cpu must be set prior to this
+    for (int j = 0 ; j < devices        ; ++j) gpu_numa_node[j] = calc_numa_node_of_gpu(j);
 
     // for (int i = 0 ; i < cores ; ++i){
     //     std::cout << "CPU " << i << " local to GPU ";
@@ -285,8 +290,10 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
 
                 h_buff_start[j] = mem;
                 h_buff_end  [j] = e  ;
-
-                gpu(cudaStreamCreateWithFlags(&(release_streams[j]), cudaStreamNonBlocking));
+                
+                int greatest;
+                gpu(cudaDeviceGetStreamPriorityRange(NULL, &greatest));
+                gpu(cudaStreamCreateWithPriority(&(release_streams[j]), cudaStreamNonBlocking, greatest));
 
                 T **bf;
                 gpu(cudaMallocHost(&bf, std::max(device_buff_size, keep_threshold)*sizeof(T *)));
@@ -543,3 +550,8 @@ __host__ void buffer_manager<T>::overwrite_bytes(void * buff, const void * data,
 }
 
 template class buffer_manager<int32_t>;
+
+
+__global__ void GpuHashRearrange_acq_buffs(void   ** buffs){
+    buffs[blockIdx.x] = get_buffers();
+}

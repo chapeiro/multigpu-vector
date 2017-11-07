@@ -31,7 +31,11 @@ void inline set_affinity_local_to_gpu(int device){
     set_affinity(&gpu_affinity[device]);
 }
 
-inline int numa_node_of_gpu(int device){ // a portable but slow way...
+inline int numa_node_of_gpu(int device){
+    return gpu_numa_node[device];
+}
+
+inline int calc_numa_node_of_gpu(int device){ // a portable but slow way...
     cpu_set_t cpus = gpu_affinity[device];
     for (int i = 0 ; i < cpu_cnt ; ++i) if (CPU_ISSET(i, &cpus)) return numa_node_of_cpu(i);
     assert(false);
@@ -63,6 +67,10 @@ inline void * cudaMallocHost_local_to_gpu(size_t size, int device){
     // gpu_run(cudaMallocHost(&mem, sizeof(T)*size));
 
     return mem;
+}
+
+inline void * cudaMallocHost_local_to_gpu(size_t size){
+    return cudaMallocHost_local_to_gpu(size, get_device());
 }
 
 inline void cudaFreeHost_local_to_gpu(void * mem, size_t size){

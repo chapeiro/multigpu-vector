@@ -21,26 +21,6 @@ void make_mem_move(const T * __restrict__ &src, int target_device, cnt_t N, cuda
     }
 }
 
-extern "C"{
-char * make_mem_move_device(char * src, size_t bytes, int target_device, void * strm){
-    int dev = get_device(src);
-
-    if (dev == target_device) return src; // block already in correct device
-
-    set_device_on_scope d(dev);
-
-    if (dev >= 0) set_affinity_local_to_gpu(dev);
-
-    assert(bytes <= sizeof(int32_t) * h_vector_size); //FIMXE: buffer manager should be able to provide blocks of arbitary size
-    char * buff = (char *) buffer_manager<int32_t>::h_get_buffer(target_device);
-
-    buffer_manager<int32_t>::overwrite_bytes(buff, src, bytes, (cudaStream_t) strm, false);
-    // buffer_manager<int32_t>::release_buffer ((int32_t *) src                             );
-
-    return buff;
-}
-}
-
 template<typename T>
 __host__ mem_move<T>::mem_move(h_operator<T> parent, int target_device): parent(parent), target_device(target_device), t(new thread([]{})){
     gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
