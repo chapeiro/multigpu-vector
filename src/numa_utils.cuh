@@ -56,6 +56,19 @@ T * malloc_host_local_to_gpu(size_t size, int device){
     return mem;
 }
 
+inline void * cudaMallocHost_local_to_cpu(size_t size, int device){
+    assert(device >= 0);
+
+    void      *mem = numa_alloc_onnode(size, device);
+    assert(mem);
+    gpu_run(cudaHostRegister(mem, size, 0));
+
+    // T * mem;
+    // gpu_run(cudaMallocHost(&mem, sizeof(T)*size));
+
+    return mem;
+}
+
 inline void * cudaMallocHost_local_to_gpu(size_t size, int device){
     assert(device >= 0);
 
@@ -73,7 +86,18 @@ inline void * cudaMallocHost_local_to_gpu(size_t size){
     return cudaMallocHost_local_to_gpu(size, get_device());
 }
 
+inline void * cudaMallocHost_local_to_cpu(size_t size){
+    return cudaMallocHost_local_to_cpu(size, numa_node_of_cpu(sched_getcpu()));
+}
+
+
 inline void cudaFreeHost_local_to_gpu(void * mem, size_t size){
+    gpu_run(cudaHostUnregister(mem));
+
+    numa_free(mem, size);
+}
+
+inline void cudaFreeHost_local_to_cpu(void * mem, size_t size){
     gpu_run(cudaHostUnregister(mem));
 
     numa_free(mem, size);

@@ -116,7 +116,7 @@ __host__ __device__ T * buffer_manager<T>::get_buffer(){
 template<typename T>
 __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_keep_threshold){
     int devices = get_num_of_gpus();
-
+    
     long cores = sysconf(_SC_NPROCESSORS_ONLN);
     assert(cores > 0);
     cpu_cnt = cores;
