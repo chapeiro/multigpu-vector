@@ -1,13 +1,12 @@
 #ifndef BUFFER_MANAGER_CUH_
 #define BUFFER_MANAGER_CUH_
 
-#include "buffer.cuh"
 #include "threadsafe_device_stack.cuh"
 #include <type_traits>
 #include "threadsafe_stack.cuh"
 #include <mutex>
 #include <vector>
-#include <numaif.h>
+// #include <numaif.h>
 #include <unordered_set>
 #include <thread>
 #include <condition_variable>
@@ -98,6 +97,7 @@ public:
 #else
         int dev = get_device(buff);
         if (dev >= 0){
+#ifndef NCUDA
             if (buff < h_buff_start[dev] || buff >= h_buff_end[dev]) return;
 
             set_device_on_scope d(dev);
@@ -112,19 +112,21 @@ public:
                 // gpu(cudaPeekAtLastError()  );
                 // gpu(cudaDeviceSynchronize());
             }
+#else
+            assert(false);
+#endif
         } else {
             if (buffer_cache.count(buff) == 0) return;
             // assert(buff->device < 0);
             // assert(get_device(buff->data) < 0);
-            int status[1];
-            int ret_code;
-            status[0]=-1;
-            ret_code=move_pages(0 /*self memory */, 1, (void **) &buff, NULL, status, 0);
+            int status = 0;
+#ifndef NNUMA
+            int ret_code = move_pages(0 /*self memory */, 1, (void **) &buff, NULL, &status, 0);
             // printf("-=Memory at %p is at %d node (retcode %d) cpu: %d\n", buff->data, status[0], ret_code, sched_getcpu());
             assert(ret_code == 0);
-
+#endif
             // printf("===============================================================> %d %p %d %d\n", buff->device, buff->data, get_device(buff->data), status[0]);
-            h_pool_numa[status[0]]->push(buff);
+            h_pool_numa[status]->push(buff);
             // printf("%d %p %d\n", buff->device, buff->data, status[0]);
         }
 #endif
