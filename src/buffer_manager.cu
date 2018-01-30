@@ -114,7 +114,7 @@ __host__ __device__ T * buffer_manager<T>::get_buffer(){
 #endif
 
 template<typename T>
-__host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_keep_threshold){
+__host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size, int buff_keep_threshold){
     int devices = get_num_of_gpus();
     
     long cores = sysconf(_SC_NPROCESSORS_ONLN);
@@ -305,15 +305,15 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
 
 
     for (int i = 0 ; i < cpu_numa_nodes ; ++i){
-        buffer_pool_constrs.emplace_back([i, size, cores, &buff_cache]{
+        buffer_pool_constrs.emplace_back([i, h_size, cores, &buff_cache]{
             set_affinity(&cpu_numa_affinity[i]);
 
-            T      *mem = (T *) numa_alloc_onnode(h_vector_size*sizeof(T)*size, i);
+            T      *mem = (T *) numa_alloc_onnode(h_vector_size*sizeof(T)*h_size, i);
             assert(mem);
-            gpu(cudaHostRegister(mem, h_vector_size*sizeof(T)*size, 0));
+            gpu(cudaHostRegister(mem, h_vector_size*sizeof(T)*h_size, 0));
 
             // T * mem;
-            // gpu(cudaMallocHost(&mem, h_vector_size*sizeof(T)*size));
+            // gpu(cudaMallocHost(&mem, h_vector_size*sizeof(T)*h_size));
 
             int status[1];
             int ret_code;
@@ -324,8 +324,8 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
             numa_assert(get_numa_addressed(mem) == i);
 
             vector<T *> buffs;
-            buffs.reserve(size);
-            for (size_t j = 0 ; j < size ; ++j) {
+            buffs.reserve(h_size);
+            for (size_t j = 0 ; j < h_size ; ++j) {
                 T        * m = mem + j * h_vector_size;
                 // buffer_t * b = cuda_new<buffer_t>(-1, m, -1);
                 buffs.push_back(m);
@@ -339,7 +339,7 @@ __host__ void buffer_manager<T>::init(int size, int buff_buffer_size, int buff_k
                 buffer_cache.insert(buffs.begin(), buffs.end());
             }
 
-            h_pool_t *p         = new h_pool_t(size, buffs);
+            h_pool_t *p         = new h_pool_t(h_size, buffs);
             
             h_pool_numa[i]      = p;
 

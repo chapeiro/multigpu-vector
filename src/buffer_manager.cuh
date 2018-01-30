@@ -58,7 +58,7 @@ public:
 
 
 
-    static __host__ void init(int size = 64, int buff_buffer_size = 8, int buff_keep_threshold = 16);
+    static __host__ void init(int size = 64, int h_size = 64, int buff_buffer_size = 8, int buff_keep_threshold = 16);
 
     static void dev_buff_manager(int dev);
 
