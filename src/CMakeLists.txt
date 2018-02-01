@@ -31,14 +31,14 @@ get_property(inc_dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIR
 #hopefully the next like will become obsolete
 string(REGEX REPLACE "([^;]+)" "-I\\1" inc_dirs2 "${inc_dirs}")
 
-cuda_add_library(multigpu STATIC ${multigpu_src} OPTIONS ${CUDA_CXXFLAGS} ${inc_dirs2})
+cuda_add_library(multigpu STATIC ${multigpu_src} OPTIONS ${CUDA_CUFLAGS} ${inc_dirs2})
 set_target_properties(multigpu PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(multigpu PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(multigpu PROPERTIES COMPILE_FLAGS "${CUDA_CXXFLAGS}")
+set_target_properties(multigpu PROPERTIES COMPILE_FLAGS "${CUDA_CUFLAGS}")
 target_link_libraries(multigpu)
 
 
-# cuda_compile_cubin(multigpu_cubin ${multigpu_src} OPTIONS ${CUDA_CXXFLAGS} ${inc_dirs2})
+# cuda_compile_cubin(multigpu_cubin ${multigpu_src} OPTIONS ${CUDA_CUFLAGS} ${inc_dirs2})
 # add_custom_target(multigpu ALL
 #     DEPENDS ${multigpu_cubin} ${multigpu_src}
 #     SOURCES ${multigpu_src})
