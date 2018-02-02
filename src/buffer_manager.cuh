@@ -14,10 +14,10 @@
 
 using namespace std;
 
-extern __device__ __constant__ threadsafe_device_stack<int32_t *, (int32_t *) NULL> * pool;
-extern __device__ __constant__ int deviceId;
-extern __device__ __constant__ void * buff_start;
-extern __device__ __constant__ void * buff_end  ;
+__device__ __constant__ threadsafe_device_stack<int32_t *, (int32_t *) NULL> * pool;
+__device__ __constant__ int deviceId;
+__device__ __constant__ void * buff_start;
+__device__ __constant__ void * buff_end  ;
 
 template<typename T>
 class buffer_manager;
@@ -46,6 +46,9 @@ public:
     static int                                                 keep_threshold;
     static void                                              **h_buff_start;
     static void                                              **h_buff_end  ;
+
+    static void                                              **h_h_buff_start;
+    static size_t                                              h_size        ;
 
     static cudaStream_t                                       *release_streams;
 
@@ -234,4 +237,10 @@ template<typename T>
 void                                              **buffer_manager<T>::h_buff_start;
 template<typename T>
 void                                              **buffer_manager<T>::h_buff_end  ;
+
+template<typename T>
+void                                              **buffer_manager<T>::h_h_buff_start;
+
+template<typename T>
+size_t                                              buffer_manager<T>::h_size;
 #endif /* BUFFER_MANAGER_CUH_ */

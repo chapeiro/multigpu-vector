@@ -8,10 +8,10 @@
 
 #include <cinttypes>
 
-__device__ __constant__ threadsafe_device_stack<int32_t *, (int32_t *) NULL> * pool;
-__device__ __constant__ int deviceId;
-__device__ __constant__ void * buff_start;
-__device__ __constant__ void * buff_end  ;
+// __device__ __constant__ threadsafe_device_stack<int32_t *, (int32_t *) NULL> * pool;
+// __device__ __constant__ int deviceId;
+// __device__ __constant__ void * buff_start;
+// __device__ __constant__ void * buff_end  ;
 
 #include <cstdio>
 #include <cinttypes>
@@ -116,6 +116,7 @@ __host__ __device__ T * buffer_manager<T>::get_buffer(){
 template<typename T>
 __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size, int buff_keep_threshold){
     int devices = get_num_of_gpus();
+    buffer_manager<T>::h_size = h_size;
     
     long cores = sysconf(_SC_NPROCESSORS_ONLN);
     assert(cores > 0);
@@ -164,6 +165,8 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
 
     h_buff_start       = new void              *[devices];
     h_buff_end         = new void              *[devices];
+
+    h_h_buff_start     = new void              *[cpu_numa_nodes];
 
     device_buff        = new T **[devices];
     device_buff_size   = buff_buffer_size;
@@ -263,10 +266,8 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
 
                 T      *mem;
                 size_t  pitch;
-                {
-                    time_block t("Tpitch: ");
-                    gpu(cudaMallocPitch(&mem, &pitch, h_vector_size*sizeof(T), size));
-                }
+                gpu(cudaMallocPitch(&mem, &pitch, h_vector_size*sizeof(T), size));
+                
                 vector<T *> buffs;
                 
                 buffs.reserve(size);
@@ -312,8 +313,8 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
 
             T      *mem = (T *) numa_alloc_onnode(h_vector_size*sizeof(T)*h_size, i);
             assert(mem);
-            gpu(cudaHostRegister(mem, h_vector_size*sizeof(T)*h_size, 0));
 
+            gpu(cudaHostRegister(mem, h_vector_size*sizeof(T)*h_size, 0));
             // T * mem;
             // gpu(cudaMallocHost(&mem, h_vector_size*sizeof(T)*h_size));
 
@@ -324,6 +325,8 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
             printf("Memory at %p is at %d node (retcode %d, cpu %d)\n", mem, status[0], ret_code, sched_getcpu());
 
             numa_assert(get_numa_addressed(mem) == i);
+
+            h_h_buff_start[i] = mem;
 
             vector<T *> buffs;
             buffs.reserve(h_size);
@@ -442,9 +445,16 @@ __host__ void buffer_manager<T>::destroy(){
                 gpu(cudaFreeHost(device_buff[j]));
             });
     }
+    
+    size_t h_size = buffer_manager<T>::h_size;
 
     for (int i = 0 ; i < cpu_numa_nodes ; ++i){
-        buffer_pool_constrs.emplace_back([i, size, cores, &buff_cache]{
+        buffer_pool_constrs.emplace_back([i, h_size]{
+            set_affinity(&cpu_numa_affinity[i]);
+
+            gpu(cudaHostUnregister(h_h_buff_start[i]));
+            numa_free(h_h_buff_start[i], h_vector_size * sizeof(T) * h_size);
+            
             delete h_pool_numa[i];
         });
     }
@@ -463,6 +473,8 @@ __host__ void buffer_manager<T>::destroy(){
 
     delete[] h_buff_start      ;
     delete[] h_buff_end        ;
+
+    delete[] h_h_buff_start    ;
 
     delete[] device_buff       ;
 
