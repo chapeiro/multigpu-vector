@@ -263,8 +263,10 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
 
                 T      *mem;
                 size_t  pitch;
-                gpu(cudaMallocPitch(&mem, &pitch, h_vector_size*sizeof(T), size));
-
+                {
+                    time_block t("Tpitch: ");
+                    gpu(cudaMallocPitch(&mem, &pitch, h_vector_size*sizeof(T), size));
+                }
                 vector<T *> buffs;
                 
                 buffs.reserve(size);
@@ -442,30 +444,9 @@ __host__ void buffer_manager<T>::destroy(){
     }
 
     for (int i = 0 ; i < cpu_numa_nodes ; ++i){
-//         buffer_pool_constrs.emplace_back([i, size, cores, &buff_cache]{
-// #ifndef NDEBUG
-//             int rc =
-// #endif
-//             pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_numa_affinity[i]);
-//             assert(rc == 0);
-//             this_thread::yield();
-
-//             T      *mem;
-//             gpu(cudaMallocHost(&mem, buffer_t::capacity()*sizeof(T)*size));
-
-//             gpu(cudaHostFree(mem));
-            // {
-            //     lock_guard<mutex> guard(buff_cache);
-            //     for (size_t i = 0 ; i < size ; ++i) {
-            //         T        * m = mem + i * buffer_t::capacity();
-            //         buffer_t * b = cuda_new<buffer_t>(-1, m, -1);
-            //         buffs.push_back(b);
-            //         buffer_cache.emplace(b, m);
-            //     }
-            // }
-
-        delete h_pool_numa[i];
-        // });
+        buffer_pool_constrs.emplace_back([i, size, cores, &buff_cache]{
+            delete h_pool_numa[i];
+        });
     }
 
     for (auto &t: buffer_pool_constrs) t.join();

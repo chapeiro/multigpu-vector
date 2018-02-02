@@ -9,22 +9,15 @@
 
 // #define NNUMA
 
-#ifndef NNUMA
 #define numa_assert(x) assert(x)
-#else
-#define numa_assert(x) ((void)0)
-#endif
-
 
 void inline set_affinity(cpu_set_t *aff){
-#ifndef NNUMA
 #ifndef NDEBUG
     int rc =
 #endif
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), aff);
     assert(rc == 0);
     // this_thread::yield();
-#endif
 }
 
 void inline set_affinity_local_to_gpu(int device){
@@ -59,7 +52,7 @@ T * malloc_host_local_to_gpu(size_t size, int device){
 inline void * cudaMallocHost_local_to_cpu(size_t size, int device){
     assert(device >= 0);
 
-    void      *mem = numa_alloc_onnode(size, device);
+    void * mem = numa_alloc_onnode(size, device);
     assert(mem);
     gpu_run(cudaHostRegister(mem, size, 0));
 

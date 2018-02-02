@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <iomanip>
+#include <vector>
 
 using namespace std;
 
@@ -29,7 +30,7 @@ private:
     volatile T * data;      //OR cnt, size, data, lock to load the non-atomic part of the DS with a single 128bit load
 
 public:
-    __host__ threadsafe_device_stack(uint32_t size, vector<T> fill, int device):
+    __host__ threadsafe_device_stack(uint32_t size, std::vector<T> fill, int device):
                 cnt(0), size(size), lock(0){
         set_device_on_scope d(device);
         gpu(cudaMalloc(&data, size*sizeof(T)));
@@ -55,6 +56,7 @@ public:
     }
 
 public:
+#ifndef NCUDA
     __device__ void push(T v){
         assert(__popc(__ballot(1)) == 1);
 
@@ -105,6 +107,22 @@ public:
     __host__ __device__ static T get_invalid(){
         return invalid_value;
     }
+#else
+    __device__ void push(T v){
+        assert(false);
+    }
+
+    __device__ bool try_pop(T *ret){
+        assert(false);
+        return true;
+    }
+
+    __device__ T pop(){ //blocking
+        assert(false);
+        T ret;
+        return ret;
+    }
+#endif
 };
 
 #endif /* THREADSAFE_DEVICE_STACK_CUH_ */

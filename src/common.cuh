@@ -27,6 +27,7 @@
 // constexpr cnt_t    h_vector_size = DEFAULT_BUFF_CAP;
 // constexpr uint32_t warp_size     =         WARPSIZE;
 
+#ifndef NCUDA
 #define gpu(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
 // __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true){
@@ -457,5 +458,8 @@ struct gen_seq : Concat<GenSeq<N/2>, GenSeq<N - N/2>>{};
 
 template<> struct gen_seq<0> : seq<>{};
 template<> struct gen_seq<1> : seq<0>{};
+#else 
+#define gpu(ans) 
+#endif
 
 #endif /* COMMON_CUH_ */
