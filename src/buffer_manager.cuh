@@ -74,6 +74,8 @@ public:
 #else
     static __host__ __device__ T * get_buffer();
 #endif
+
+    static __device__ T * try_get_buffer();
 //     static __device__ bool try_get_buffer2(T **ret){
 // #ifdef __CUDA_ARCH__
 //         if (pool->try_pop(ret)){
@@ -88,16 +90,19 @@ public:
 
     static __host__ inline T * h_get_buffer(int dev);
 
-    static __host__ __device__ void release_buffer(T * buff){//, cudaStream_t strm){
+private:
+    static __device__ void __release_buffer_device(T * buff){
         if (!buff) return;
-#ifdef __CUDA_ARCH__
         // assert(strm == 0); //FIXME: something better ?
         // if (buff->device == deviceId) { //FIXME: remote device!
             // buff->clean();
             // __threadfence();
         if (buff >= buff_start && buff < buff_end) pool->push(buff);
         // } else                          assert(false); //FIXME: IMPORTANT free buffer of another device (or host)!
-#else
+    }
+
+    static __host__ void __release_buffer_host(T * buff){
+        if (!buff) return;
         int dev = get_device(buff);
         if (dev >= 0){
 #ifndef NCUDA
@@ -130,8 +135,26 @@ public:
             h_pool_numa[status]->push(buff);
             // printf("%d %p %d\n", buff->device, buff->data, status[0]);
         }
+    }
+
+public:
+#if defined(__clang__) && defined(__CUDA__)
+    static __device__ void release_buffer(T * buff){//, cudaStream_t strm){
+        __release_buffer_device(buff);
+    }
+
+    static __host__ void release_buffer(T * buff){//, cudaStream_t strm){
+        __release_buffer_host(buff);
+    }
+#else
+    static __host__ __device__ void release_buffer(T * buff){//, cudaStream_t strm){
+#ifdef __CUDA_ARCH__
+        __release_buffer_device(buff);
+#else
+        __release_buffer_host(buff);
 #endif
     }
+#endif
 
 //     static __host__ __device__ void release_buffer(buffer_t * buff){
 // #ifdef __CUDA_ARCH__
@@ -140,7 +163,7 @@ public:
 //         cudaStream_t strm = 0;
 //         int dev = get_device(buff);
 //         if (dev >= 0){
-//             set_device_on_scope d(dev);
+//             set_device_on_score d(dev);
 
 //             gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
 //         }

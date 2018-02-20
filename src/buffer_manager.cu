@@ -84,7 +84,9 @@ __global__ void release_buffer_host(void **buff, int buffs){
 __global__ void get_buffer_host(void **buff, int buffs){
     assert(blockDim.x * blockDim.y * blockDim.z == 1);
     assert( gridDim.x *  gridDim.y *  gridDim.z == 1);
-    for (int i = 0 ; i < buffs ; ++i) buff[i] = buffer_manager<int32_t>::get_buffer();
+    printf("Fetching\n");
+    for (int i = 0 ; i < buffs ; ++i) buff[i] = buffer_manager<int32_t>::try_get_buffer();
+    printf("Fetched\n");
 }
 
 int                                                 cpu_cnt;
@@ -112,6 +114,14 @@ __host__ __device__ T * buffer_manager<T>::get_buffer(){
 #endif
 }
 #endif
+
+template<typename T>
+__device__ T * buffer_manager<T>::try_get_buffer(){
+    T * b;
+    bool got = pool->try_pop(&b);
+    if (!got) b = NULL;
+    return b;
+}
 
 template<typename T>
 __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size, int buff_keep_threshold){
@@ -295,8 +305,10 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
                 h_buff_end  [j] = e  ;
                 
                 int greatest;
-                gpu(cudaDeviceGetStreamPriorityRange(NULL, &greatest));
-                gpu(cudaStreamCreateWithPriority(&(release_streams[j]), cudaStreamNonBlocking, greatest));
+                int lowest;
+                gpu(cudaDeviceGetStreamPriorityRange(&greatest, &lowest));
+                std::cout << greatest << " " << lowest << std::endl;
+                gpu(cudaStreamCreateWithPriority(&(release_streams[j]), cudaStreamNonBlocking, lowest));
 
                 T **bf;
                 gpu(cudaMallocHost(&bf, std::max(device_buff_size, keep_threshold)*sizeof(T *)));
@@ -502,10 +514,20 @@ void buffer_manager<T>::dev_buff_manager(int dev){
 
         if (terminating) break;
 
+            std::cout << "Launching..." << std::endl;
         get_buffer_host<<<1, 1, 0, release_streams[dev]>>>((void **) device_buff[dev], device_buff_size);
         gpu(cudaStreamSynchronize(release_streams[dev]));
+            std::cout << "Finished..." << std::endl;
 
-        device_buffs_pool[dev].insert(device_buffs_pool[dev].end(), device_buff[dev], device_buff[dev]+device_buff_size);
+        for (size_t i = 0 ; i < device_buff_size ; ++i){
+            if (device_buff[dev][i]) device_buffs_pool[dev].push_back(device_buff[dev][i]);
+        }
+
+        if (device_buffs_pool[dev].empty()) {
+            std::cout << "Sleeping..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        // device_buffs_pool[dev].insert(device_buffs_pool[dev].end(), device_buff[dev], device_buff[dev]+device_buff_size);
 
         device_buffs_cv[dev].notify_all();
         // lk.unlock();
