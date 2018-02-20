@@ -64,11 +64,12 @@ public:
 
         assert(cnt < size);
         data[cnt++] = v;
+        // printf("pushed %p\n", v);
 
-        lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
-        // __threadfence();
+        // lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
+        __threadfence();
 
-        // atomicExch((int *) &lock, 0);
+        atomicExch((int *) &lock, 0);
     }
 
     __device__ bool try_pop(T *ret){
@@ -77,18 +78,20 @@ public:
         if (atomicCAS((int *) &lock, 0, 1) != 0) return false;
 
         if (cnt == 0) {
-            lock = 0;   //FIXME: atomicExch() is probably needed here. This should have undef behavior
-            // atomicExch((int *) &lock, 0);
+            // lock = 0;   //FIXME: atomicExch() is probably needed here. This should have undef behavior
+            atomicExch((int *) &lock, 0);
+            // printf("popped empty\n");
             return false;
         }
 
         *ret = data[--cnt];
+        // printf("popped %p\n", *ret);
 
-        lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
+        // lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
 
-        // __threadfence();
+        __threadfence();
 
-        // atomicExch((int *) &lock, 0);
+        atomicExch((int *) &lock, 0);
 
         return true;
     }
@@ -97,6 +100,7 @@ public:
         assert(__popc(__ballot(1)) == 1);
         T ret;
         while (!try_pop(&ret));
+        // printf("popped %p\n", ret);
         return ret;
     }
 
