@@ -50,6 +50,13 @@ __device__ void release_buffers(int32_t * buff){
     } while (b);
 }
 
+__device__ void dprinti(int32_t x){
+    printf("%d\n", x);
+}
+
+__device__ void dprintptr(void * x){
+    printf("%p\n", x);
+}
 }
 
 void initializeModule(CUmodule & cudaModule){
@@ -84,9 +91,7 @@ __global__ void release_buffer_host(void **buff, int buffs){
 __global__ void get_buffer_host(void **buff, int buffs){
     assert(blockDim.x * blockDim.y * blockDim.z == 1);
     assert( gridDim.x *  gridDim.y *  gridDim.z == 1);
-    printf("Fetching\n");
     for (int i = 0 ; i < buffs ; ++i) buff[i] = buffer_manager<int32_t>::try_get_buffer();
-    printf("Fetched\n");
 }
 
 int                                                 cpu_cnt;
@@ -118,7 +123,7 @@ __host__ __device__ T * buffer_manager<T>::get_buffer(){
 template<typename T>
 __device__ T * buffer_manager<T>::try_get_buffer(){
     T * b;
-    bool got = pool->try_pop(&b);
+    bool got = pool->pop_if_nonempty(&b);
     if (!got) b = NULL;
     return b;
 }
@@ -172,6 +177,8 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
 
     h_pool             = new h_pool_t *         [cores  ];
     h_pool_numa        = new h_pool_t *         [cpu_numa_nodes];
+
+    h_d_pool           = new pool_t            *[devices];
 
     h_buff_start       = new void              *[devices];
     h_buff_end         = new void              *[devices];
@@ -301,6 +308,7 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
                 void * e = (void *) (((char *) mem) + size*pitch);
                 gpu(cudaMemcpyToSymbol(buff_end  ,   &e, sizeof(void   *)));
 
+                h_d_pool    [j] = tmp;
                 h_buff_start[j] = mem;
                 h_buff_end  [j] = e  ;
                 
@@ -398,6 +406,8 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
     // h_pool = new h_pool_t(size, buffs);
 
     for (auto &t: buffer_pool_constrs) t.join();
+
+    buffer_logger = new thread{buffer_manager<T>::log_buffers};
 }
 
 template<typename T>
@@ -412,6 +422,7 @@ __host__ void buffer_manager<T>::destroy(){
 
     terminating = true;
 
+    buffer_logger->join();
     // device_buffs_mutex = new mutex              [devices];
     // device_buffs_pool  = new vector<buffer_t *> [devices];
     // release_streams    = new cudaStream_t       [devices];
@@ -483,6 +494,8 @@ __host__ void buffer_manager<T>::destroy(){
     delete[] h_pool            ;
     delete[] h_pool_numa       ;
 
+    delete[] h_d_pool          ;
+
     delete[] h_buff_start      ;
     delete[] h_buff_end        ;
 
@@ -508,32 +521,79 @@ template<typename T>
 void buffer_manager<T>::dev_buff_manager(int dev){
     set_device_on_scope d(dev);
 
-    std::unique_lock<mutex> lk(device_buffs_mutex[dev]);
     while (true){
-        device_buffs_cv[dev].wait(lk, [dev]{return device_buffs_pool[dev].empty() || terminating;});
+        bool sleep = false;
+        int added = 0;
+        {
+            std::unique_lock<mutex> lk(device_buffs_mutex[dev]);
+            
+            device_buffs_cv[dev].wait(lk, [dev]{return device_buffs_pool[dev].empty() || terminating;});
 
-        if (terminating) break;
+            if (terminating) break;
 
-            std::cout << "Launching..." << std::endl;
-        get_buffer_host<<<1, 1, 0, release_streams[dev]>>>((void **) device_buff[dev], device_buff_size);
-        gpu(cudaStreamSynchronize(release_streams[dev]));
-            std::cout << "Finished..." << std::endl;
+            get_buffer_host<<<1, 1, 0, release_streams[dev]>>>((void **) device_buff[dev], device_buff_size);
+            gpu(cudaStreamSynchronize(release_streams[dev]));
 
-        for (size_t i = 0 ; i < device_buff_size ; ++i){
-            if (device_buff[dev][i]) device_buffs_pool[dev].push_back(device_buff[dev][i]);
+
+            for (size_t i = 0 ; i < device_buff_size ; ++i){
+                if (device_buff[dev][i]) {
+                    device_buffs_pool[dev].push_back(device_buff[dev][i]);
+                    ++added;
+                }
+            }
+
+            device_buffs_cv[dev].notify_all();
+
+            sleep = device_buffs_pool[dev].empty();
+
+            lk.unlock();
         }
 
-        if (device_buffs_pool[dev].empty()) {
-            std::cout << "Sleeping..." << std::endl;
+        if (sleep) {
+            std::cout << "Sleeping... (" << added << ")" << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::cout << "Waking..." << std::endl;
         }
         // device_buffs_pool[dev].insert(device_buffs_pool[dev].end(), device_buff[dev], device_buff[dev]+device_buff_size);
 
-        device_buffs_cv[dev].notify_all();
         // lk.unlock();
     }
 }
 
+template<typename T>
+__host__ void buffer_manager<T>::log_buffers(){
+    int devices = get_num_of_gpus();
+    uint32_t        cnts[devices];
+    cudaStream_t    strs[devices];
+    
+    for (int i = 0 ; i < devices ; ++i){
+        set_device_on_scope d(i);
+        gpu(cudaStreamCreateWithFlags(strs+i, cudaStreamNonBlocking));
+    }
+
+    char progress[]{"-\\|/"};
+    size_t iter = 0;
+
+    while (!terminating){
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        for (int i = 0 ; i < devices ; ++i){
+            gpu(cudaMemcpyAsync(cnts + i, (void *) &(h_d_pool[i]->cnt), sizeof(decltype(pool_t::cnt)), cudaMemcpyDefault, strs[i]));
+        }
+        for (int i = 0 ; i < devices ; ++i) gpu(cudaStreamSynchronize(strs[i]));
+        std::cerr << "\0337\033[H\r";
+        for (int i = 0 ; i < 80 ; ++i) std::cerr << ' ';
+        std::cerr << "\rBuffers on device: ";
+        for (int i = 0 ; i < devices ; ++i) std::cerr << cnts[i] << "(+" << device_buffs_pool[i].size() << ") ";
+        std::cerr << "\t\t" << progress[(iter++) % (sizeof(progress) - 1)]; //for null character
+        std::cerr << "\0338";
+        std::cerr.flush();
+    }
+
+    for (int i = 0 ; i < devices ; ++i){
+        set_device_on_scope d(i);
+        gpu(cudaStreamDestroy(strs[i]));
+    }
+}
 
 template<typename T>
 __host__ inline T * buffer_manager<T>::h_get_buffer(int dev){
@@ -569,4 +629,14 @@ template class buffer_manager<int32_t>;
 
 __global__ void GpuHashRearrange_acq_buffs(void   ** buffs){
     buffs[blockIdx.x] = get_buffers();
+}
+
+extern "C"{
+void gpu_memset(void * dst, int32_t val, size_t size){
+    cudaStream_t strm;
+    gpu(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
+    gpu(cudaMemsetAsync(dst, val, size, strm));
+    gpu(cudaStreamSynchronize(strm));
+    gpu(cudaStreamDestroy(strm));
+}
 }

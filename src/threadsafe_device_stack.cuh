@@ -6,10 +6,12 @@
 #include <limits>
 #include <iomanip>
 #include <vector>
+#include <type_traits>
 
 using namespace std;
 
-
+template<typename T>
+class buffer_manager;
 
 /**
  * Based on a combination of :
@@ -96,6 +98,32 @@ public:
         return true;
     }
 
+    __device__ bool pop_if_nonempty(T *ret){ //blocking
+        assert(__popc(__ballot(1)) == 1);
+
+        if (cnt == 0) return false;
+
+        while (atomicCAS((int *) &lock, 0, 1) != 0);
+
+        if (cnt == 0) {
+            // lock = 0;   //FIXME: atomicExch() is probably needed here. This should have undef behavior
+            atomicExch((int *) &lock, 0);
+            // printf("popped empty\n");
+            return false;
+        }
+
+        *ret = data[--cnt];
+        // printf("popped %p\n", *ret);
+
+        // lock = 0;       //FIXME: atomicExch() is probably needed here. This should have undef behavior
+
+        __threadfence();
+
+        atomicExch((int *) &lock, 0);
+
+        return true;
+    }
+
     __device__ T pop(){ //blocking
         assert(__popc(__ballot(1)) == 1);
         T ret;
@@ -127,6 +155,9 @@ public:
         return ret;
     }
 #endif
+
+    template<typename U>
+    friend class buffer_manager; //std::remove_pointer<T>>;
 };
 
 #endif /* THREADSAFE_DEVICE_STACK_CUH_ */

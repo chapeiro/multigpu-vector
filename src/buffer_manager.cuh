@@ -52,10 +52,13 @@ public:
 
     static cudaStream_t                                       *release_streams;
 
+    static pool_t                                            **h_d_pool;
     static threadsafe_stack<T *, (T *) NULL>                 **h_pool;
     static threadsafe_stack<T *, (T *) NULL>                 **h_pool_numa;
 
     static unordered_set<T *>                                  buffer_cache;
+
+    static std::thread                                        *buffer_logger;
 
 
 
@@ -98,33 +101,42 @@ private:
             // buff->clean();
             // __threadfence();
         if (buff >= buff_start && buff < buff_end) pool->push(buff);
+        // else printf("Throwing buffer: %p\n", buff);
         // } else                          assert(false); //FIXME: IMPORTANT free buffer of another device (or host)!
     }
 
     static __host__ void __release_buffer_host(T * buff){
         if (!buff) return;
+        nvtxRangePushA("release_buffer_host");
         int dev = get_device(buff);
         if (dev >= 0){
 #ifndef NCUDA
             if (buff < h_buff_start[dev] || buff >= h_buff_end[dev]) return;
 
+            nvtxRangePushA("release_buffer_host_devbuffer");
             set_device_on_scope d(dev);
             std::unique_lock<std::mutex> lock(device_buffs_mutex[dev]);
             device_buffs_pool[dev].push_back(buff);
             size_t size = device_buffs_pool[dev].size();
             if (size > keep_threshold){
+                nvtxRangePushA("release_buffer_host_devbuffer_overflow");
                 for (int i = 0 ; i < device_buff_size ; ++i) device_buff[dev][i] = device_buffs_pool[dev][size-i-1];
                 device_buffs_pool[dev].erase(device_buffs_pool[dev].end()-device_buff_size, device_buffs_pool[dev].end());
                 release_buffer_host<<<1, 1, 0, release_streams[dev]>>>((void **) device_buff[dev], device_buff_size);
                 gpu(cudaStreamSynchronize(release_streams[dev]));
                 // gpu(cudaPeekAtLastError()  );
                 // gpu(cudaDeviceSynchronize());
+                nvtxRangePop();
             }
+            device_buffs_cv[dev].notify_all();
+            nvtxRangePop();
 #else
             assert(false);
 #endif
         } else {
+            nvtxRangePushA("release_buffer_host_hostbuffer");
             if (buffer_cache.count(buff) == 0) return;
+            nvtxRangePushA("release_buffer_host_actual_release");
             // assert(buff->device < 0);
             // assert(get_device(buff->data) < 0);
             int status = 0;
@@ -134,7 +146,10 @@ private:
             // printf("===============================================================> %d %p %d %d\n", buff->device, buff->data, get_device(buff->data), status[0]);
             h_pool_numa[status]->push(buff);
             // printf("%d %p %d\n", buff->device, buff->data, status[0]);
+            nvtxRangePop();
+            nvtxRangePop();
         }
+        nvtxRangePop();
     }
 
 public:
@@ -207,6 +222,8 @@ public:
     static __host__ void overwrite_bytes(void * buff, const void * data, size_t bytes, cudaStream_t strm, bool blocking = true);
 
     static __host__ void destroy(); //FIXME: cleanup...
+
+    static __host__ void log_buffers();
 };
 
 extern "C" {
@@ -219,6 +236,9 @@ __device__ void dprinti64(int64_t x);
 __device__ int32_t * get_buffers();
 __device__ void release_buffers(int32_t * buff);
 }
+
+template<typename T>
+typename buffer_manager<T>::pool_t ** buffer_manager<T>::h_d_pool;
 
 template<typename T>
 threadsafe_stack<T *, (T *) NULL> ** buffer_manager<T>::h_pool;
@@ -266,4 +286,7 @@ void                                              **buffer_manager<T>::h_h_buff_
 
 template<typename T>
 size_t                                              buffer_manager<T>::h_size;
+
+template<typename T>
+std::thread                                        *buffer_manager<T>::buffer_logger;
 #endif /* BUFFER_MANAGER_CUH_ */
