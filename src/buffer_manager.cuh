@@ -94,7 +94,7 @@ public:
     static __host__ inline T * h_get_buffer(int dev);
 
 private:
-    static __device__ void __release_buffer_device(T * buff){
+    static __device__ __forceinline__ void __release_buffer_device(T * buff){
         if (!buff) return;
         // assert(strm == 0); //FIXME: something better ?
         // if (buff->device == deviceId) { //FIXME: remote device!
@@ -105,7 +105,7 @@ private:
         // } else                          assert(false); //FIXME: IMPORTANT free buffer of another device (or host)!
     }
 
-    static __host__ void __release_buffer_host(T * buff){
+    static __host__ __forceinline__ void __release_buffer_host(T * buff){
         if (!buff) return;
         nvtxRangePushA("release_buffer_host");
         int dev = get_device(buff);
@@ -154,15 +154,15 @@ private:
 
 public:
 #if defined(__clang__) && defined(__CUDA__)
-    static __device__ void release_buffer(T * buff){//, cudaStream_t strm){
+    static __device__ __forceinline__ void release_buffer(T * buff){//, cudaStream_t strm){
         __release_buffer_device(buff);
     }
 
-    static __host__ void release_buffer(T * buff){//, cudaStream_t strm){
+    static __host__ __forceinline__ void release_buffer(T * buff){//, cudaStream_t strm){
         __release_buffer_host(buff);
     }
 #else
-    static __host__ __device__ void release_buffer(T * buff){//, cudaStream_t strm){
+    static __host__ __device__ __forceinline__ void release_buffer(T * buff){//, cudaStream_t strm){
 #ifdef __CUDA_ARCH__
         __release_buffer_device(buff);
 #else

@@ -59,12 +59,12 @@ public:
 
 public:
 #ifndef NCUDA
-    __device__ void push(T v){
-        assert(__popc(__ballot(1)) == 1);
+    __device__ __forceinline__ void push(T v){
+        // assert(__popc(__ballot(1)) == 1);
 
         while (atomicCAS((int *) &lock, 0, 1) != 0);
 
-        assert(cnt < size);
+        // assert(cnt < size);
         data[cnt++] = v;
         // printf("pushed %p\n", v);
 
@@ -74,8 +74,8 @@ public:
         atomicExch((int *) &lock, 0);
     }
 
-    __device__ bool try_pop(T *ret){
-        assert(__popc(__ballot(1)) == 1);
+    __device__ __forceinline__ bool try_pop(T *ret){
+        // assert(__popc(__ballot(1)) == 1);
 
         if (atomicCAS((int *) &lock, 0, 1) != 0) return false;
 
@@ -98,8 +98,8 @@ public:
         return true;
     }
 
-    __device__ bool pop_if_nonempty(T *ret){ //blocking
-        assert(__popc(__ballot(1)) == 1);
+    __device__ __forceinline__ bool pop_if_nonempty(T *ret){ //blocking
+        // assert(__popc(__ballot(1)) == 1);
 
         if (cnt == 0) return false;
 
@@ -124,32 +124,32 @@ public:
         return true;
     }
 
-    __device__ T pop(){ //blocking
-        assert(__popc(__ballot(1)) == 1);
+    __device__ __forceinline__ T pop(){ //blocking
+        // assert(__popc(__ballot(1)) == 1);
         T ret;
         while (!try_pop(&ret));
         // printf("popped %p\n", ret);
         return ret;
     }
 
-    __host__ __device__ static bool is_valid(T &x){
+    __host__ __device__ __forceinline__ static bool is_valid(T &x){
         return x != invalid_value;
     }
 
-    __host__ __device__ static T get_invalid(){
+    __host__ __device__ __forceinline__ static T get_invalid(){
         return invalid_value;
     }
 #else
-    __device__ void push(T v){
+    __device__ __forceinline__ void push(T v){
         assert(false);
     }
 
-    __device__ bool try_pop(T *ret){
+    __device__ __forceinline__ bool try_pop(T *ret){
         assert(false);
         return true;
     }
 
-    __device__ T pop(){ //blocking
+    __device__ __forceinline__ T pop(){ //blocking
         assert(false);
         T ret;
         return ret;
