@@ -7,7 +7,8 @@
 #include <mutex>
 #include <vector>
 #include <numaif.h>
-#include <unordered_set>
+#include <unordered_map>
+#include <atomic>
 #include <thread>
 #include <condition_variable>
 #include <sched.h>
@@ -56,7 +57,7 @@ public:
     static threadsafe_stack<T *, (T *) NULL>                 **h_pool;
     static threadsafe_stack<T *, (T *) NULL>                 **h_pool_numa;
 
-    static unordered_set<T *>                                  buffer_cache;
+    static unordered_map<T *, std::atomic<int>>                buffer_cache;
 
     static std::thread                                        *buffer_logger;
 
@@ -68,7 +69,13 @@ public:
     static void dev_buff_manager(int dev);
 
     static __host__ T * get_buffer_numa(int numa_node){
-        return h_pool[numa_node]->pop();
+        T * b = h_pool[numa_node]->pop();
+#ifndef NDEBUG
+        int old = 
+#endif
+        buffer_cache[b]++;
+        assert(old == 0);
+        return b;
     }
 
 #if defined(__clang__) && defined(__CUDA__)
@@ -135,17 +142,21 @@ private:
 #endif
         } else {
             nvtxRangePushA("release_buffer_host_hostbuffer");
-            if (buffer_cache.count(buff) == 0) return;
+            const auto &it = buffer_cache.find(buff);
+            if (it == buffer_cache.end()) return;
             nvtxRangePushA("release_buffer_host_actual_release");
-            // assert(buff->device < 0);
-            // assert(get_device(buff->data) < 0);
-            int status = 0;
-            int ret_code = move_pages(0 /*self memory */, 1, (void **) &buff, NULL, &status, 0);
-            // printf("-=Memory at %p is at %d node (retcode %d) cpu: %d\n", buff->data, status[0], ret_code, sched_getcpu());
-            assert(ret_code == 0);
-            // printf("===============================================================> %d %p %d %d\n", buff->device, buff->data, get_device(buff->data), status[0]);
-            h_pool_numa[status]->push(buff);
-            // printf("%d %p %d\n", buff->device, buff->data, status[0]);
+            int occ = (it->second)--;
+            if (occ == 1){
+                // assert(buff->device < 0);
+                // assert(get_device(buff->data) < 0);
+                int status = 0;
+                int ret_code = move_pages(0 /*self memory */, 1, (void **) &buff, NULL, &status, 0);
+                // printf("-=Memory at %p is at %d node (retcode %d) cpu: %d\n", buff->data, status[0], ret_code, sched_getcpu());
+                assert(ret_code == 0);
+                // printf("===============================================================> %d %p %d %d\n", buff->device, buff->data, get_device(buff->data), status[0]);
+                h_pool_numa[status]->push(buff);
+                // printf("%d %p %d\n", buff->device, buff->data, status[0]);
+            }
             nvtxRangePop();
             nvtxRangePop();
         }
@@ -153,6 +164,13 @@ private:
     }
 
 public:
+    static __host__ __forceinline__ bool share_host_buffer(T * buff){
+        const auto &it = buffer_cache.find(buff);
+        if (it == buffer_cache.end()) return true;
+        (it->second)++;
+        return true;
+    }
+
 #if defined(__clang__) && defined(__CUDA__)
     static __device__ __forceinline__ void release_buffer(T * buff){//, cudaStream_t strm){
         __release_buffer_device(buff);
@@ -247,7 +265,7 @@ template<typename T>
 threadsafe_stack<T *, (T *) NULL> ** buffer_manager<T>::h_pool_numa;
 
 template<typename T>
-unordered_set<T *> buffer_manager<T>::buffer_cache;
+unordered_map<T *, atomic<int>> buffer_manager<T>::buffer_cache;
 
 template<typename T>
 mutex                                              *buffer_manager<T>::device_buffs_mutex;

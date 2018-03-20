@@ -296,9 +296,9 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
                     // cout << "Device " << j << " : data = " << m << endl;
                     assert(get_device(m) == j);
                 }
-                {
+                {   //FIXME: why are we including device buffers in the cache?
                     lock_guard<mutex> guard(buff_cache);
-                    buffer_cache.insert(buffs.begin(), buffs.end());
+                    for (const auto b: buffs) buffer_cache[b] = 0;
                 }
                 
                 pool_t * tmp =  cuda_new<pool_t>(j, size, buffs, j);
@@ -361,7 +361,7 @@ __host__ void buffer_manager<T>::init(int size, int h_size, int buff_buffer_size
 
             {
                 lock_guard<mutex> guard(buff_cache);
-                buffer_cache.insert(buffs.begin(), buffs.end());
+                for (const auto b: buffs) buffer_cache[b] = 0;
             }
 
             h_pool_t *p         = new h_pool_t(h_size, buffs);
