@@ -247,10 +247,14 @@ public:
 extern "C" {
     void * get_buffer    (size_t bytes);
     void   release_buffer(void * buff );
+
+    void * get_dev_buffer();
 }
 
 extern "C"{
+__device__ void dprinti(int32_t x);
 __device__ void dprinti64(int64_t x);
+__device__ void dprintptr(void * x);
 __device__ int32_t * get_buffers();
 __device__ void release_buffers(int32_t * buff);
 }

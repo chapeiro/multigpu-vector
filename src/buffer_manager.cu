@@ -38,6 +38,10 @@ __device__ int32_t * get_buffers(){
     return ret;
 }
 
+void * get_dev_buffer(){
+    return buffer_manager<int32_t>::h_get_buffer(get_device());
+}
+
 __device__ void release_buffers(int32_t * buff){
     uint32_t b = __ballot(buff != NULL);
     uint32_t m = 1 << get_laneid();
@@ -563,6 +567,8 @@ void buffer_manager<T>::dev_buff_manager(int dev){
 template<typename T>
 __host__ void buffer_manager<T>::log_buffers(){
     int devices = get_num_of_gpus();
+    if (devices <= 0) return;
+
     uint32_t        cnts[devices];
     cudaStream_t    strs[devices];
     
