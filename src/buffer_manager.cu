@@ -1,22 +1,23 @@
-#include "buffer_manager.cuh"
-
-#include <thread>
-#include <utmpx.h>
-#include <unistd.h>
+// #include "buffer_manager.cuh"
+#include <cinttypes>
+#include <cstdint>
+#include <cstdio>
 
 #include "numa_utils.cuh"
-
-#include <cinttypes>
+// #include <cinttypes>
 
 // __device__ __constant__ threadsafe_device_stack<int32_t *, (int32_t *) NULL> * pool;
 // __device__ __constant__ int deviceId;
 // __device__ __constant__ void * buff_start;
 // __device__ __constant__ void * buff_end  ;
 
-#include <cstdio>
-#include <cinttypes>
 #include "common/gpu/gpu-common.hpp"
+
 #include "multigpu/buffer_manager.cuh"
+
+#include <thread>
+// #include <utmpx.h>
+// #include <unistd.h>
 
 extern "C"{
 
@@ -566,6 +567,7 @@ void buffer_manager<T>::dev_buff_manager(int dev){
 
 template<typename T>
 __host__ void buffer_manager<T>::log_buffers(){
+    return;
     int devices = get_num_of_gpus();
     if (devices <= 0) return;
 
